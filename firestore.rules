@@ -1,0 +1,63 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incomingUserId() {
+      return request.resource.data.userId;
+    }
+
+    function existingUserId() {
+      return resource.data.userId;
+    }
+
+    match /captures/{captureId} {
+      allow read: if isOwner(existingUserId());
+      allow create: if isOwner(incomingUserId())
+        && incomingUserId() is string
+        && request.resource.data.reviewStatus == 'unreviewed';
+      allow update: if isOwner(existingUserId());
+      allow delete: if isOwner(existingUserId());
+    }
+
+    match /actions/{actionId} {
+      allow read: if isOwner(existingUserId());
+      allow create: if isOwner(incomingUserId());
+      allow update: if isOwner(existingUserId());
+      allow delete: if isOwner(existingUserId());
+    }
+
+    match /assets/{assetId} {
+      allow read: if isOwner(existingUserId());
+      allow create: if isOwner(incomingUserId());
+      allow update: if isOwner(existingUserId());
+      allow delete: if isOwner(existingUserId());
+    }
+
+    match /decisions/{decisionId} {
+      allow read: if isOwner(existingUserId());
+      allow create: if isOwner(incomingUserId());
+      allow update: if isOwner(existingUserId());
+      allow delete: if isOwner(existingUserId());
+    }
+
+    // Written by Cloud Functions (admin SDK). Clients read only.
+    match /reviewRuns/{runId} {
+      allow read: if isOwner(existingUserId());
+      allow write: if false;
+    }
+
+    match /aiUsage/{usageId} {
+      allow read: if isSignedIn()
+        && usageId.matches('^' + request.auth.uid + '_[0-9]{4}-[0-9]{2}$');
+      allow write: if false;
+    }
+  }
+}

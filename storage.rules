@@ -1,0 +1,22 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    match /captures/{userId}/{captureId}/{fileName} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId)
+        && request.resource.size < 25 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*|audio/.*|video/webm');
+    }
+
+    // Obsidian export files — written by Cloud Functions, readable by owner.
+    match /obsidian-export/{userId}/{allPaths=**} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+  }
+}
