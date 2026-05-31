@@ -5,14 +5,16 @@ import {
   assetsQuery,
   capturesQuery,
   decisionsQuery,
+  waitingOnsQuery,
 } from "../data";
 import { registerMediaSync } from "../mediaSync";
-import type { Action, Asset, Capture, Decision } from "../types";
+import type { Action, Asset, Capture, Decision, WaitingOn } from "../types";
 import { convertDoc } from "../utils/convertDoc";
 
 export function useCommandCenterData(userId: string) {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
+  const [waitingOns, setWaitingOns] = useState<WaitingOn[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [decisions, setDecisions] = useState<Decision[]>([]);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -24,6 +26,9 @@ export function useCommandCenterData(userId: string) {
     const unsubActions = onSnapshot(actionsQuery(userId), (snapshot) => {
       setActions(snapshot.docs.map((doc) => convertDoc<Action>(doc)));
     });
+    const unsubWaitingOns = onSnapshot(waitingOnsQuery(userId), (snapshot) => {
+      setWaitingOns(snapshot.docs.map((doc) => convertDoc<WaitingOn>(doc)));
+    });
     const unsubAssets = onSnapshot(assetsQuery(userId), (snapshot) => {
       setAssets(snapshot.docs.map((doc) => convertDoc<Asset>(doc)));
     });
@@ -33,6 +38,7 @@ export function useCommandCenterData(userId: string) {
     return () => {
       unsubCaptures();
       unsubActions();
+      unsubWaitingOns();
       unsubAssets();
       unsubDecisions();
     };
@@ -72,6 +78,7 @@ export function useCommandCenterData(userId: string) {
   return {
     captures,
     actions,
+    waitingOns,
     assets,
     decisions,
     openActions,

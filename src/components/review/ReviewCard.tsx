@@ -9,6 +9,7 @@ import {
 } from "../../data";
 import type { Capture, ProjectId, ProposalType } from "../../types";
 import { UploadBadge } from "../shared/UploadBadge";
+import { CaptureSourceSummary } from "./CaptureSourceSummary";
 
 export function ReviewCard({ userId, capture }: { userId: string; capture: Capture }) {
   const hasProposal = capture.reviewStatus === "proposed";
@@ -71,8 +72,8 @@ export function ReviewCard({ userId, capture }: { userId: string; capture: Captu
     <article className="review-card">
       {capture.mediaUrl && <img src={capture.mediaUrl} alt="Captured notebook or reference" />}
       {capture.audioUrl && <audio controls src={capture.audioUrl} className="capture-audio" />}
+      <CaptureSourceSummary capture={capture} />
       <div className="capture-type">
-        <span>{capture.type.replace("_", " ")}</span>
         {hasProposal && <span className="proposal-badge">AI proposed {capture.proposedType}</span>}
         <UploadBadge capture={capture} />
       </div>

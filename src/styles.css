@@ -153,6 +153,11 @@ h2 {
   font-size: 1.75rem;
 }
 
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .icon-button,
 .check-button {
   width: 42px;
@@ -174,6 +179,7 @@ h2 {
 }
 
 .attention-band,
+.harlan-doctrine,
 .panel,
 .capture-card,
 .review-card,
@@ -191,6 +197,49 @@ h2 {
   grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   padding: 10px;
+}
+
+.harlan-doctrine {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  padding: 16px;
+}
+
+.harlan-doctrine h2 {
+  margin-bottom: 4px;
+  font-size: 1.28rem;
+}
+
+.harlan-doctrine p {
+  max-width: 620px;
+  margin-bottom: 12px;
+  color: #6a5f53;
+}
+
+.harlan-mark {
+  display: inline-grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 8px;
+  color: #fffaf1;
+  background: #2f4b3d;
+}
+
+.harlan-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.harlan-rules span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  color: #2f4b3d;
+  background: #e2eadf;
+  font-size: 0.74rem;
+  font-weight: 800;
 }
 
 .metric {
@@ -568,6 +617,55 @@ textarea:focus {
   text-transform: uppercase;
 }
 
+.source-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f0e5;
+}
+
+.source-icon {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 8px;
+  color: #2f4b3d;
+  background: #e2eadf;
+}
+
+.source-summary h3 {
+  margin: 3px 0 4px;
+  font-size: 0.98rem;
+}
+
+.source-summary p {
+  margin: 0;
+  color: #6a5f53;
+  font-size: 0.84rem;
+}
+
+.source-summary .source-snippet {
+  margin-top: 8px;
+  color: #261f18;
+}
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #2f4b3d;
+  background: rgba(119, 152, 111, 0.22);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .proposal-badge {
   display: inline-flex;
   align-items: center;
@@ -759,3 +857,150 @@ select {
   margin-bottom: 12px;
 }
 
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: end center;
+  padding: 16px;
+  background: rgba(38, 31, 24, 0.22);
+}
+
+.settings-panel {
+  width: min(620px, 100%);
+  max-height: min(760px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid rgba(38, 31, 24, 0.14);
+  border-radius: 8px;
+  background: #fffaf1;
+  box-shadow: 0 24px 80px rgba(38, 31, 24, 0.22);
+}
+
+.settings-header,
+.settings-section,
+.integration-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-header {
+  margin-bottom: 14px;
+}
+
+.integration-list {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-section {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f0e5;
+}
+
+.settings-section h3 {
+  margin: 0 0 4px;
+  font-size: 0.98rem;
+}
+
+.settings-section p {
+  margin: 0;
+  color: #6a5f53;
+  font-size: 0.86rem;
+}
+
+.settings-select {
+  flex: 0 0 150px;
+  background: #fffaf1;
+}
+
+.integration-item {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f6f0e5;
+}
+
+.integration-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 8px;
+  color: #2f4b3d;
+  background: #e2eadf;
+}
+
+.integration-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.integration-copy p,
+.settings-note,
+.settings-message {
+  color: #6a5f53;
+  font-size: 0.86rem;
+}
+
+.integration-copy p {
+  margin: 4px 0 8px;
+}
+
+.integration-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #2f4b3d;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.secondary-button.compact {
+  min-height: 38px;
+  padding: 0 14px;
+}
+
+.settings-note {
+  margin: 14px 0 0;
+}
+
+.settings-message {
+  margin: 10px 0 0;
+  font-weight: 800;
+}
+
+@media (min-width: 760px) {
+  .settings-backdrop {
+    place-items: start end;
+    padding: 82px max(16px, calc((100vw - 920px) / 2)) 16px;
+  }
+}
+
+@media (max-width: 520px) {
+  .settings-section,
+  .integration-item {
+    display: grid;
+    grid-template-columns: auto 1fr;
+  }
+
+  .settings-select {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .settings-section button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .integration-item button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}

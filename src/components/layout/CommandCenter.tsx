@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FolderKanban, Home, Inbox, LogOut, Plus } from "lucide-react";
+import { FolderKanban, Home, Inbox, LogOut, Plus, Settings } from "lucide-react";
 import { signOut, type User } from "firebase/auth";
 import { auth } from "../../firebase";
 import { useCommandCenterData } from "../../hooks/useCommandCenterData";
@@ -7,12 +7,18 @@ import { CapturePanel } from "../capture/CapturePanel";
 import { Dispatch } from "../dispatch/Dispatch";
 import { ProjectsPanel } from "../projects/ProjectsPanel";
 import { ReviewPanel } from "../review/ReviewPanel";
+import { SettingsPanel } from "../settings/SettingsPanel";
 import { NavButton, tabTitle, type Tab } from "./NavButton";
 
 export function CommandCenter({ user }: { user: User }) {
   const [tab, setTab] = useState<Tab>("dispatch");
+  const [settingsOpen, setSettingsOpen] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("settings") === "integrations";
+  });
   const {
     captures,
+    waitingOns,
     assets,
     decisions,
     openActions,
@@ -29,15 +35,21 @@ export function CommandCenter({ user }: { user: User }) {
           <p className="eyebrow">HomeStud OS</p>
           <h1>{tabTitle(tab)}</h1>
         </div>
-        <button className="icon-button" aria-label="Sign out" onClick={() => signOut(auth)}>
-          <LogOut size={20} />
-        </button>
+        <div className="topbar-actions">
+          <button className="icon-button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>
+            <Settings size={20} />
+          </button>
+          <button className="icon-button" aria-label="Sign out" onClick={() => signOut(auth)}>
+            <LogOut size={20} />
+          </button>
+        </div>
       </header>
 
       <section className="content">
         {tab === "dispatch" && (
           <Dispatch
             actions={openActions}
+            waitingOns={waitingOns}
             reviewCount={reviewCaptures.length}
             captures={captures}
           />
@@ -86,6 +98,8 @@ export function CommandCenter({ user }: { user: User }) {
           onClick={() => setTab("projects")}
         />
       </nav>
+
+      {settingsOpen && <SettingsPanel user={user} onClose={() => setSettingsOpen(false)} />}
     </main>
   );
 }

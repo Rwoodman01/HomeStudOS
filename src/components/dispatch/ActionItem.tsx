@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CheckCircle2, Clock, Loader2 } from "lucide-react";
 import {
   completeAction,
-  markActionWaiting,
+  createWaitingOnFromAction,
   projectName,
   updateActionPriority,
 } from "../../data";
@@ -27,7 +27,7 @@ export function ActionItem({ action }: { action: Action }) {
     if (!waitingOn.trim()) return;
     setSaving(true);
     try {
-      await markActionWaiting(action.id, waitingOn.trim());
+      await createWaitingOnFromAction(action, waitingOn.trim());
       setShowWaitingInput(false);
     } finally {
       setSaving(false);

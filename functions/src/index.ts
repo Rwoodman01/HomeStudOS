@@ -1,8 +1,9 @@
 import { initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
-import { defineSecret } from "firebase-functions/params";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+import { defineSecret, defineString } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 
 initializeApp();
@@ -11,9 +12,13 @@ const db = getFirestore();
 const bucket = getStorage().bucket();
 
 const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
+const googleOAuthClientSecret = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
+const googleOAuthClientId = defineString("GOOGLE_OAUTH_CLIENT_ID");
+const appBaseUrl = defineString("APP_BASE_URL", { default: "https://homestud-os.web.app" });
 
 const REVIEW_BATCH_CAP = 20;
 const AI_MODEL = "claude-3-5-haiku-20241022";
+const GOOGLE_REDIRECT_PATH = "/googleOAuthCallback";
 
 // Haiku 3.5 pricing (USD per token)
 const INPUT_COST_PER_TOKEN = 0.25 / 1_000_000;
@@ -21,6 +26,7 @@ const OUTPUT_COST_PER_TOKEN = 1.25 / 1_000_000;
 
 type ProjectId = "outpost" | "gifted" | "kv" | "homestead";
 type ProposalType = "action" | "asset" | "decision" | "archive";
+type IntegrationId = "gmail" | "calendar";
 
 type AiProposal = {
   captureId: string;
@@ -36,7 +42,71 @@ type AnthropicResponse = {
   usage?: { input_tokens?: number; output_tokens?: number };
 };
 
-const SYSTEM_PROMPT = `You classify captures for HomeStud OS — Bobby Woodman's personal command center.
+type GoogleTokenResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+  token_type?: string;
+  error?: string;
+  error_description?: string;
+};
+
+type GmailThreadListResponse = {
+  threads?: Array<{ id: string; historyId?: string }>;
+};
+
+type GmailThreadResponse = {
+  id: string;
+  messages?: Array<{
+    id: string;
+    snippet?: string;
+    internalDate?: string;
+    payload?: {
+      headers?: Array<{ name: string; value: string }>;
+    };
+  }>;
+};
+
+type CalendarEventsResponse = {
+  items?: Array<{
+    id?: string;
+    htmlLink?: string;
+    summary?: string;
+    description?: string;
+    location?: string;
+    start?: { date?: string; dateTime?: string };
+    end?: { date?: string; dateTime?: string };
+    updated?: string;
+  }>;
+};
+
+const SYSTEM_PROMPT = `You are Harlan, the continuity layer for HomeStud OS.
+
+Mission: Kill the Drift.
+Core promise: nothing important gets dropped.
+
+Role:
+- Remember commitments, open loops, waiting-ons, follow-ups, captures, escalations, and priorities so Bobby does not have to carry everything in his head.
+- Keep the flow clean: Capture → Harlan → Dispatch → Action.
+- Own dispatch generation: Urgent, Top 5, Waiting On, Captures to Review, Looking Ahead.
+- Make sure every important item eventually ends as Completed, Deferred, Delegated, Archived, or Abandoned intentionally. No silent disappearing.
+
+Boundaries:
+- Do not send emails automatically.
+- Do not replace Claude for writing.
+- Do not replace Gemini for research.
+- Do not create autonomous agent chaos.
+
+System principle:
+- Use logic first.
+- Use AI only where judgment is needed.
+- 1926 discipline. 2026 tools.
+
+Operational memory lives in Firebase: actions, captures, waitingOns, projects, assets, decisions.
+Knowledge memory lives in Obsidian: research, frameworks, lessons, prompts, decisions, book notes, useful AI outputs.
+
+You classify captures for Bobby Woodman's personal command center.
 
 Projects (use exact ids):
 - outpost — The Outpost (men's accountability platform)
@@ -64,7 +134,217 @@ Return ONLY valid JSON (no markdown fences):
   ]
 }
 
-proposedPriority is required only when proposedType is action. Be direct. Match Bobby's voice — plain, no fluff.`;
+proposedPriority is required only when proposedType is action.
+
+Classification rules:
+- If it creates a commitment, follow-up, escalation, repair, call, errand, or visible next move, classify it as action.
+- If Bobby is waiting on another person or outside condition, classify it as action and make the waiting-on clear in the title or summary.
+- If it is durable knowledge worth finding again, classify it as asset for Obsidian.
+- If it records a choice, tradeoff, or policy, classify it as decision for Obsidian.
+- If it is noise, duplicate, or intentionally not worth keeping, classify it as archive.
+- Gmail captures where Bobby owes a reply, follow-up, answer, quote, payment, decision, or confirmation should become actions.
+- Gmail captures where someone else owes Bobby a reply, payment, decision, delivery, quote, or update should become actions with the waiting-on person named clearly.
+- Calendar captures that require prep, travel, a follow-up, a reminder, or a decision should become actions.
+- Calendar captures that are only context and require no next move should be archived unless they record durable knowledge.
+
+Voice: direct, calm, plain. No fluff. No motivational copy. Preserve continuity and say what is what.`;
+
+export const getGoogleOAuthUrl = onCall(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Sign in required.");
+  }
+
+  const { integrationId, scopes } = request.data as {
+    integrationId?: IntegrationId;
+    scopes?: string[];
+  };
+
+  if (!integrationId || !["gmail", "calendar"].includes(integrationId)) {
+    throw new HttpsError("invalid-argument", "Valid integrationId required.");
+  }
+  if (!Array.isArray(scopes) || scopes.length === 0) {
+    throw new HttpsError("invalid-argument", "At least one scope required.");
+  }
+
+  const stateRef = db.collection("oauthStates").doc();
+  await stateRef.set({
+    userId: request.auth.uid,
+    integrationId,
+    scopes,
+    status: "pending",
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.searchParams.set("client_id", googleOAuthClientId.value());
+  url.searchParams.set("redirect_uri", googleRedirectUri());
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("access_type", "offline");
+  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("include_granted_scopes", "true");
+  url.searchParams.set("scope", scopes.join(" "));
+  url.searchParams.set("state", stateRef.id);
+
+  return { url: url.toString() };
+});
+
+export const googleOAuthCallback = onRequest(
+  { secrets: [googleOAuthClientSecret] },
+  async (request, response) => {
+    const code = typeof request.query.code === "string" ? request.query.code : "";
+    const state = typeof request.query.state === "string" ? request.query.state : "";
+
+    if (!code || !state) {
+      response.status(400).send("Missing OAuth code or state.");
+      return;
+    }
+
+    const stateRef = db.collection("oauthStates").doc(state);
+    const stateSnap = await stateRef.get();
+    if (!stateSnap.exists) {
+      response.status(400).send("Invalid OAuth state.");
+      return;
+    }
+
+    const stateData = stateSnap.data() as {
+      userId: string;
+      integrationId: IntegrationId;
+      scopes: string[];
+      status: string;
+    };
+
+    if (stateData.status !== "pending") {
+      response.status(400).send("OAuth state already used.");
+      return;
+    }
+
+    try {
+      const token = await exchangeGoogleCode(code);
+      if (!token.access_token) {
+        throw new Error(token.error_description || token.error || "Missing access token");
+      }
+
+      const existingTokenRef = db.collection("googleOAuthTokens").doc(stateData.userId);
+      const existingTokenSnap = await existingTokenRef.get();
+      const existingScopes = Array.isArray(existingTokenSnap.data()?.scopes)
+        ? (existingTokenSnap.data()?.scopes as string[])
+        : [];
+      const scopes = Array.from(new Set([...existingScopes, ...stateData.scopes]));
+
+      await existingTokenRef.set(
+        {
+          userId: stateData.userId,
+          ...(token.refresh_token ? { refreshToken: token.refresh_token } : {}),
+          scopes,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      await db
+        .collection("users")
+        .doc(stateData.userId)
+        .collection("integrations")
+        .doc(stateData.integrationId)
+        .set(
+          {
+            userId: stateData.userId,
+            status: "connected",
+            scopes: stateData.scopes,
+            connectedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+      await stateRef.update({
+        status: "completed",
+        completedAt: FieldValue.serverTimestamp(),
+      });
+
+      response.redirect(`${appBaseUrl.value()}?settings=integrations&connected=${stateData.integrationId}`);
+    } catch (error) {
+      logger.error("Google OAuth callback failed", error);
+      await stateRef.update({
+        status: "failed",
+        completedAt: FieldValue.serverTimestamp(),
+      });
+      response.redirect(`${appBaseUrl.value()}?settings=integrations&connected=failed`);
+    }
+  },
+);
+
+export const syncGoogleIntegrations = onSchedule(
+  {
+    schedule: "*/30 * * * *",
+    timeZone: "America/Halifax",
+    secrets: [googleOAuthClientSecret],
+  },
+  async () => {
+    const tokensSnap = await db.collection("googleOAuthTokens").get();
+    let userCount = 0;
+    let captureCount = 0;
+
+    for (const tokenDoc of tokensSnap.docs) {
+      const token = tokenDoc.data();
+      const userId = token.userId as string;
+      const refreshToken = token.refreshToken as string | undefined;
+      const scopes = Array.isArray(token.scopes) ? (token.scopes as string[]) : [];
+      if (!refreshToken) continue;
+
+      try {
+        if (!(await shouldRunDebriefNow(userId))) continue;
+        const accessToken = await refreshGoogleAccessToken(refreshToken);
+        const imported = await syncGoogleForUser(userId, accessToken, scopes);
+        userCount += 1;
+        captureCount += imported;
+        await tokenDoc.ref.update({
+          lastSyncAt: FieldValue.serverTimestamp(),
+          lastSyncStatus: "completed",
+          lastImportedCount: imported,
+        });
+      } catch (error) {
+        logger.error("Google integration sync failed", { userId, error });
+        await tokenDoc.ref.update({
+          lastSyncAt: FieldValue.serverTimestamp(),
+          lastSyncStatus: "failed",
+        });
+      }
+    }
+
+    logger.info("Google integration sync complete", { userCount, captureCount });
+  },
+);
+
+export const runGoogleDebriefNow = onCall(
+  { secrets: [googleOAuthClientSecret], timeoutSeconds: 120 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Sign in required.");
+    }
+
+    const tokenDoc = await db.collection("googleOAuthTokens").doc(request.auth.uid).get();
+    const token = tokenDoc.data();
+    const refreshToken = token?.refreshToken as string | undefined;
+    const scopes = Array.isArray(token?.scopes) ? (token?.scopes as string[]) : [];
+
+    if (!refreshToken) {
+      throw new HttpsError("failed-precondition", "Connect Gmail or Calendar first.");
+    }
+
+    const accessToken = await refreshGoogleAccessToken(refreshToken);
+    const imported = await syncGoogleForUser(request.auth.uid, accessToken, scopes);
+
+    await tokenDoc.ref.update({
+      lastManualSyncAt: FieldValue.serverTimestamp(),
+      lastSyncAt: FieldValue.serverTimestamp(),
+      lastSyncStatus: "completed",
+      lastImportedCount: imported,
+    });
+
+    return { imported };
+  },
+);
 
 /** Callable: batch AI review for unreviewed captures. */
 export const runAiReview = onCall(
@@ -251,6 +531,185 @@ async function logAiUsage(userId: string, tokenIn: number, tokenOut: number, cos
     },
     { merge: true },
   );
+}
+
+function googleRedirectUri() {
+  return `https://us-central1-homestud-os.cloudfunctions.net/${GOOGLE_REDIRECT_PATH.slice(1)}`;
+}
+
+async function exchangeGoogleCode(code: string): Promise<GoogleTokenResponse> {
+  const body = new URLSearchParams({
+    code,
+    client_id: googleOAuthClientId.value(),
+    client_secret: googleOAuthClientSecret.value(),
+    redirect_uri: googleRedirectUri(),
+    grant_type: "authorization_code",
+  });
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  return (await response.json()) as GoogleTokenResponse;
+}
+
+async function refreshGoogleAccessToken(refreshToken: string): Promise<string> {
+  const body = new URLSearchParams({
+    refresh_token: refreshToken,
+    client_id: googleOAuthClientId.value(),
+    client_secret: googleOAuthClientSecret.value(),
+    grant_type: "refresh_token",
+  });
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  const token = (await response.json()) as GoogleTokenResponse;
+  if (!response.ok || !token.access_token) {
+    throw new Error(token.error_description || token.error || "Google token refresh failed");
+  }
+  return token.access_token;
+}
+
+async function syncGoogleForUser(userId: string, accessToken: string, scopes: string[]) {
+  let imported = 0;
+  if (scopes.includes("https://www.googleapis.com/auth/gmail.readonly")) {
+    imported += await syncGmailForUser(userId, accessToken);
+  }
+  if (scopes.includes("https://www.googleapis.com/auth/calendar.readonly")) {
+    imported += await syncCalendarForUser(userId, accessToken);
+  }
+  return imported;
+}
+
+async function shouldRunDebriefNow(userId: string) {
+  const settingsSnap = await db.collection("users").doc(userId).collection("settings").doc("harlan").get();
+  const settings = settingsSnap.data();
+  const debriefTime = typeof settings?.debriefTime === "string" ? settings.debriefTime : "20:30";
+  const timezone = typeof settings?.timezone === "string" ? settings.timezone : "America/Halifax";
+  const localTime = currentLocalTime(timezone);
+  return localTime === debriefTime;
+}
+
+function currentLocalTime(timezone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "00";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+  return `${hour}:${minute}`;
+}
+
+async function syncGmailForUser(userId: string, accessToken: string) {
+  const list = await googleApi<GmailThreadListResponse>(
+    "https://gmail.googleapis.com/gmail/v1/users/me/threads?maxResults=10&q=newer_than:2d",
+    accessToken,
+  );
+
+  let imported = 0;
+  for (const thread of list.threads ?? []) {
+    const detail = await googleApi<GmailThreadResponse>(
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads/${thread.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+      accessToken,
+    );
+    const firstMessage = detail.messages?.[0];
+    const latestMessage = detail.messages?.[detail.messages.length - 1] ?? firstMessage;
+    if (!firstMessage || !latestMessage) continue;
+
+    const subject = gmailHeader(firstMessage, "Subject") || "(no subject)";
+    const from = gmailHeader(firstMessage, "From") || "unknown sender";
+    const date = gmailHeader(latestMessage, "Date") || "";
+    const snippet = latestMessage.snippet || firstMessage.snippet || "";
+    const captureId = `gmail_${thread.id}`;
+
+    const captureRef = db.collection("captures").doc(captureId);
+    const existing = await captureRef.get();
+    if (existing.exists) continue;
+
+    await captureRef.set({
+      userId,
+      type: "text",
+      rawText: `Gmail thread: ${subject}\nFrom: ${from}\nDate: ${date}\n\n${snippet}`,
+      reviewStatus: "unreviewed",
+      source: "gmail",
+      gmailThreadId: thread.id,
+      gmailMessageId: latestMessage.id,
+      gmailSubject: subject,
+      gmailFrom: from,
+      gmailDate: date,
+      gmailSnippet: snippet,
+      createdAt: FieldValue.serverTimestamp(),
+      capturedAt: FieldValue.serverTimestamp(),
+    });
+    imported += 1;
+  }
+
+  return imported;
+}
+
+async function syncCalendarForUser(userId: string, accessToken: string) {
+  const timeMin = new Date();
+  const timeMax = new Date();
+  timeMax.setDate(timeMax.getDate() + 14);
+  const url = new URL("https://www.googleapis.com/calendar/v3/calendars/primary/events");
+  url.searchParams.set("singleEvents", "true");
+  url.searchParams.set("orderBy", "startTime");
+  url.searchParams.set("maxResults", "20");
+  url.searchParams.set("timeMin", timeMin.toISOString());
+  url.searchParams.set("timeMax", timeMax.toISOString());
+
+  const data = await googleApi<CalendarEventsResponse>(url.toString(), accessToken);
+  let imported = 0;
+
+  for (const event of data.items ?? []) {
+    if (!event.id || !event.summary) continue;
+
+    const captureRef = db.collection("captures").doc(`calendar_${event.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+    const existing = await captureRef.get();
+    if (existing.exists) continue;
+
+    const startsAt = event.start?.dateTime ?? event.start?.date ?? "unknown time";
+    const endsAt = event.end?.dateTime ?? event.end?.date ?? "unknown time";
+    await captureRef.set({
+      userId,
+      type: "text",
+      rawText: `Calendar event: ${event.summary}\nWhen: ${startsAt} to ${endsAt}\nLocation: ${event.location ?? ""}\n\n${event.description ?? ""}`,
+      reviewStatus: "unreviewed",
+      source: "calendar",
+      calendarEventId: event.id,
+      calendarEventLink: event.htmlLink ?? "",
+      calendarTitle: event.summary,
+      calendarLocation: event.location ?? "",
+      eventStart: startsAt,
+      eventEnd: endsAt,
+      createdAt: FieldValue.serverTimestamp(),
+      capturedAt: FieldValue.serverTimestamp(),
+    });
+    imported += 1;
+  }
+
+  return imported;
+}
+
+async function googleApi<T>(url: string, accessToken: string): Promise<T> {
+  const response = await fetch(url, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Google API ${response.status}: ${await response.text()}`);
+  }
+  return (await response.json()) as T;
+}
+
+function gmailHeader(message: NonNullable<GmailThreadResponse["messages"]>[number], name: string) {
+  return message.payload?.headers?.find((header) => header.name.toLowerCase() === name.toLowerCase())?.value;
 }
 
 /** Callable: export approved asset markdown to Storage obsidian-export path. Phase 3. */

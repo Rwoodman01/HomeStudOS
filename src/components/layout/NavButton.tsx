@@ -20,7 +20,7 @@ export function NavButton({
 export type Tab = "dispatch" | "capture" | "review" | "projects";
 
 export function tabTitle(tab: Tab) {
-  if (tab === "dispatch") return "Dispatch";
+  if (tab === "dispatch") return "Harlan Dispatch";
   if (tab === "capture") return "Capture";
   if (tab === "review") return "Review";
   return "Projects";

@@ -2,24 +2,34 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
+import type { User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { db, functions, storage } from "./firebase";
 import { savePendingMedia } from "./offlineQueue";
 import { syncCaptureMedia } from "./mediaSync";
 import type {
+  Action,
   ActionPriority,
   ActionStatus,
   Asset,
   CaptureType,
+  IntegrationConnection,
+  IntegrationId,
   ProjectId,
   ProposalType,
+  UserSettings,
+  WaitingOn,
 } from "./types";
 
 export const projects: Array<{ id: ProjectId; name: string; shortName: string }> = [
@@ -49,6 +59,15 @@ export function actionsQuery(userId: string) {
   );
 }
 
+export function waitingOnsQuery(userId: string) {
+  return query(
+    collection(db, "waitingOns"),
+    where("userId", "==", userId),
+    where("status", "==", "open"),
+    orderBy("createdAt", "desc"),
+  );
+}
+
 export function assetsQuery(userId: string) {
   return query(
     collection(db, "assets"),
@@ -63,6 +82,14 @@ export function decisionsQuery(userId: string) {
     where("userId", "==", userId),
     orderBy("createdAt", "desc"),
   );
+}
+
+export function integrationRef(userId: string, integrationId: IntegrationId) {
+  return doc(db, "users", userId, "integrations", integrationId);
+}
+
+export function userSettingsRef(userId: string) {
+  return doc(db, "users", userId, "settings", "harlan");
 }
 
 export function projectName(projectId: ProjectId) {
@@ -80,6 +107,65 @@ export async function createTextCapture(userId: string, rawText: string) {
     createdAt: serverTimestamp(),
     capturedAt: serverTimestamp(),
   });
+}
+
+export async function getIntegrationConnection(
+  userId: string,
+  integrationId: IntegrationId,
+): Promise<IntegrationConnection | null> {
+  const snap = await getDoc(integrationRef(userId, integrationId));
+  if (!snap.exists()) return null;
+  return { id: integrationId, ...snap.data() } as IntegrationConnection;
+}
+
+export async function connectGoogleIntegration(params: {
+  user: User;
+  integrationId: IntegrationId;
+  scopes: string[];
+}) {
+  const callable = httpsCallable<
+    { integrationId: IntegrationId; scopes: string[] },
+    { url: string }
+  >(functions, "getGoogleOAuthUrl");
+  const result = await callable({
+    integrationId: params.integrationId,
+    scopes: params.scopes,
+  });
+  window.location.assign(result.data.url);
+}
+
+export async function runGoogleDebriefNow() {
+  const callable = httpsCallable<Record<string, never>, { imported: number }>(
+    functions,
+    "runGoogleDebriefNow",
+  );
+  const result = await callable({});
+  return result.data;
+}
+
+export async function getUserSettings(userId: string): Promise<UserSettings> {
+  const snap = await getDoc(userSettingsRef(userId));
+  if (!snap.exists()) {
+    return {
+      userId,
+      debriefTime: "20:30",
+      timezone: "America/Halifax",
+    };
+  }
+  return { userId, ...snap.data() } as UserSettings;
+}
+
+export async function updateDebriefTime(userId: string, debriefTime: string) {
+  await setDoc(
+    userSettingsRef(userId),
+    {
+      userId,
+      debriefTime,
+      timezone: "America/Halifax",
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 export async function createPhotoCapture(userId: string, file: File, rawText = "") {
@@ -202,6 +288,72 @@ export async function markActionWaiting(actionId: string, waitingOn: string) {
   await updateDoc(doc(db, "actions", actionId), {
     status: "waiting",
     waitingOn,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function createWaitingOnFromAction(action: Action, waitingOn: string) {
+  const batch = writeBatch(db);
+  const waitingOnRef = doc(db, "waitingOns", action.id);
+
+  batch.set(waitingOnRef, {
+    userId: action.userId,
+    projectId: action.projectId,
+    title: action.title,
+    waitingOn,
+    status: "open",
+    relatedActionId: action.id,
+    ...(action.sourceCaptureId ? { sourceCaptureId: action.sourceCaptureId } : {}),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
+  batch.update(doc(db, "actions", action.id), {
+    status: "waiting",
+    waitingOn,
+    updatedAt: serverTimestamp(),
+  });
+
+  await batch.commit();
+}
+
+export async function resolveWaitingOn(waitingOn: WaitingOn, relatedWaitingOnIds: string[] = []) {
+  await runTransaction(db, async (transaction) => {
+    const waitingOnRef = doc(db, "waitingOns", waitingOn.id);
+    const relatedWaitingOnRefs = relatedWaitingOnIds
+      .filter((id) => id !== waitingOn.id)
+      .map((id) => doc(db, "waitingOns", id));
+    const actionRef = waitingOn.relatedActionId
+      ? doc(db, "actions", waitingOn.relatedActionId)
+      : null;
+    const actionSnap = actionRef ? await transaction.get(actionRef) : null;
+
+    transaction.update(waitingOnRef, {
+      status: "resolved",
+      updatedAt: serverTimestamp(),
+    });
+    for (const relatedWaitingOnRef of relatedWaitingOnRefs) {
+      transaction.update(relatedWaitingOnRef, {
+        status: "resolved",
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    if (!actionRef || !actionSnap?.exists()) return;
+
+    const status = actionSnap.data().status;
+    if (status !== "done" && status !== "archived") {
+      transaction.update(actionRef, {
+        status: "open",
+        updatedAt: serverTimestamp(),
+      });
+    }
+  });
+}
+
+export async function archiveWaitingOn(waitingOnId: string) {
+  await updateDoc(doc(db, "waitingOns", waitingOnId), {
+    status: "archived",
     updatedAt: serverTimestamp(),
   });
 }

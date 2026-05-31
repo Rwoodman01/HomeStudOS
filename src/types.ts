@@ -4,8 +4,11 @@ export type ReviewStatus = "unreviewed" | "proposed" | "approved" | "archived";
 export type ProposalType = "action" | "asset" | "decision" | "archive";
 export type ActionStatus = "open" | "done" | "waiting" | "archived";
 export type ActionPriority = "urgent" | "today" | "normal";
+export type WaitingOnStatus = "open" | "followed_up" | "resolved" | "archived" | "abandoned";
 export type UploadStatus = "pending_upload" | "uploaded" | "failed";
 export type ObsidianSyncStatus = "pending" | "synced" | "failed";
+export type IntegrationId = "gmail" | "calendar";
+export type IntegrationStatus = "not_connected" | "connected" | "error";
 
 export type Capture = {
   id: string;
@@ -22,7 +25,19 @@ export type Capture = {
   proposedSummary?: string;
   proposedPriority?: ActionPriority;
   aiReviewRunId?: string;
-  source: "mobile" | "manual";
+  source: "mobile" | "manual" | "gmail" | "calendar";
+  gmailThreadId?: string;
+  gmailMessageId?: string;
+  gmailSubject?: string;
+  gmailFrom?: string;
+  gmailDate?: string;
+  gmailSnippet?: string;
+  calendarEventId?: string;
+  calendarEventLink?: string;
+  calendarTitle?: string;
+  calendarLocation?: string;
+  eventStart?: string;
+  eventEnd?: string;
   uploadStatus?: UploadStatus;
   offlineClientId?: string;
   createdAt?: Date;
@@ -41,6 +56,20 @@ export type Action = {
   dueDate?: string;
   waitingOn?: string;
   sourceCaptureId?: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+};
+
+export type WaitingOn = {
+  id: string;
+  userId: string;
+  projectId: ProjectId;
+  title: string;
+  waitingOn: string;
+  status: WaitingOnStatus;
+  relatedActionId?: string;
+  sourceCaptureId?: string;
+  followUpDate?: string;
   createdAt?: Date;
   updatedAt?: Date;
 };
@@ -83,4 +112,21 @@ export type PendingMediaRecord = {
   rawText: string;
   offlineClientId: string;
   createdAt: number;
+};
+
+export type IntegrationConnection = {
+  id: IntegrationId;
+  userId: string;
+  status: IntegrationStatus;
+  scopes: string[];
+  email?: string | null;
+  connectedAt?: Date;
+  updatedAt?: Date;
+};
+
+export type UserSettings = {
+  userId: string;
+  debriefTime: string;
+  timezone: string;
+  updatedAt?: Date;
 };

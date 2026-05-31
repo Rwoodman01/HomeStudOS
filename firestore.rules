@@ -34,6 +34,18 @@ service cloud.firestore {
       allow delete: if isOwner(existingUserId());
     }
 
+    match /waitingOns/{waitingOnId} {
+      allow get, list: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+    }
+
     match /assets/{assetId} {
       allow read: if isOwner(existingUserId());
       allow create: if isOwner(incomingUserId());
@@ -58,6 +70,34 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && usageId.matches('^' + request.auth.uid + '_[0-9]{4}-[0-9]{2}$');
       allow write: if false;
+    }
+
+    match /users/{userId}/integrations/{integrationId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && request.resource.data.userId == userId
+        && request.resource.data.status in ['connected', 'error']
+        && request.resource.data.scopes is list;
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/settings/{settingsId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId)
+        && settingsId == 'harlan'
+        && request.resource.data.userId == userId
+        && request.resource.data.debriefTime is string
+        && request.resource.data.timezone == 'America/Halifax';
+      allow delete: if isOwner(userId);
+    }
+
+    // Server-owned OAuth state and refresh tokens. Cloud Functions use Admin SDK.
+    match /oauthStates/{stateId} {
+      allow read, write: if false;
+    }
+
+    match /googleOAuthTokens/{userId} {
+      allow read, write: if false;
     }
   }
 }
