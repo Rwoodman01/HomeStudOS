@@ -263,7 +263,10 @@
     <div class="capture-row">
       <input type="text" id="captureInput" placeholder="Capture a thought, task, or follow-up…" onkeydown="if(event.key==='Enter')fireCapture()">
       <button onclick="fireCapture()">Capture</button>
+      <button onclick="firePhotoCapture()" title="Capture notebook page">📷</button>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none" onchange="handlePhotoSelected(this)">
     </div>
+    <div id="photo-queue-status" style="display:none;font-size:12px;color:var(--faded);padding:2px 0 6px 2px;"></div>
 
     <div class="dispatch-section">
       <div class="dispatch-label urgent">Urgent</div>

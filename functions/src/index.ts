@@ -4,6 +4,7 @@ import { getStorage } from "firebase-admin/storage";
 import { onCall } from "firebase-functions/v2/https";
 import { onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { onObjectFinalized } from "firebase-functions/v2/storage";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 
@@ -263,6 +264,103 @@ export const claudeStream = onRequest(
 
     response.write("data: [DONE]\n\n");
     response.end();
+  },
+);
+
+/** Storage trigger: transcribe a notebook photo with Haiku vision → update capture doc. */
+export const processNotebookPhoto = onObjectFinalized(
+  { secrets: [anthropicApiKey], timeoutSeconds: 120, region: "us-east1" },
+  async (event) => {
+    const filePath = event.data.name ?? "";
+
+    // Only process captures/{uid}/{captureId}/photo.jpg
+    const match = filePath.match(/^captures\/([^/]+)\/([^/]+)\/photo\.jpg$/);
+    if (!match) return;
+
+    const [, userId, captureId] = match;
+
+    // Download image and convert to base64
+    const file = bucket().file(filePath);
+    let imageBase64: string;
+    try {
+      const [contents] = await file.download();
+      imageBase64 = contents.toString("base64");
+    } catch (err) {
+      logger.error("Failed to download notebook photo", { filePath, err });
+      return;
+    }
+
+    // Find the capture doc (keyed by captureId field, not doc id, since addDoc generates its own id)
+    const capturesSnap = await db()
+      .collection("captures")
+      .where("userId", "==", userId)
+      .where("captureId", "==", captureId)
+      .limit(1)
+      .get();
+
+    if (capturesSnap.empty) {
+      logger.warn("No capture doc found for notebook photo", { captureId });
+      return;
+    }
+
+    const captureRef = capturesSnap.docs[0].ref;
+
+    // Call Haiku vision to transcribe
+    const apiKey = anthropicApiKey.value();
+    let transcription = "";
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: AI_MODEL,
+          max_tokens: 2048,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: { type: "base64", media_type: "image/jpeg", data: imageBase64 },
+                },
+                {
+                  type: "text",
+                  text: "Transcribe everything handwritten on this notebook page. Preserve the structure — bullet points, numbered lists, headings, arrows, anything indicating hierarchy or grouping. Return plain text only. No commentary, no interpretation, no markdown fencing.",
+                },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Anthropic ${response.status}: ${await response.text()}`);
+      }
+
+      const data = (await response.json()) as AnthropicResponse;
+      const block = data.content.find((b) => b.type === "text");
+      transcription = block?.text?.trim() ?? "";
+    } catch (err) {
+      logger.error("Haiku vision transcription failed", { captureId, err });
+      await captureRef.update({
+        reviewStatus: "unreviewed",
+        rawText: "[Transcription failed — tap to edit]",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+
+    await captureRef.update({
+      rawText: transcription,
+      reviewStatus: "unreviewed",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    logger.info("Notebook photo transcribed", { captureId, chars: transcription.length });
   },
 );
 

@@ -6,6 +6,8 @@ import { getFirestore, collection, addDoc, doc, getDoc, setDoc,
                                 from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { getFunctions, httpsCallable }
                                 from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js';
+import { getStorage, ref, uploadBytes }
+                                from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js';
 
 const firebaseApp = initializeApp({
   apiKey:            'AIzaSyBF9QkwP42TQrS6F7xwZVXfyRmDptZzW-8',
@@ -19,6 +21,7 @@ const firebaseApp = initializeApp({
 const auth      = getAuth(firebaseApp);
 const db        = getFirestore(firebaseApp);
 const functions = getFunctions(firebaseApp, 'us-central1');
+const storage   = getStorage(firebaseApp);
 
 // Identity-only provider — no Gmail/Calendar scopes here.
 // Those connect separately via server-side OAuth flow.
@@ -37,6 +40,7 @@ onAuthStateChanged(auth, async user => {
     await loadIntegrationStatus(user.uid);
     subscribeDispatch(user.uid);
     checkOAuthReturn();
+    uploadPendingPhotos();
   } else {
     renderDispatch([], [], []);
   }
@@ -263,6 +267,123 @@ async function saveCapture(text) {
   });
 }
 
+// ── Photo capture (offline-first) ───────────────────────────
+const PHOTO_DB_NAME = 'hs-photo-queue';
+const PHOTO_STORE   = 'pending';
+
+function openPhotoDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PHOTO_DB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(PHOTO_STORE, { keyPath: 'id' });
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function queuePhoto(blob, captureId) {
+  const db = await openPhotoDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).put({ id: captureId, blob, userId: currentUser.uid, queuedAt: Date.now() });
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+async function getPendingPhotos() {
+  const db = await openPhotoDb();
+  return new Promise((resolve, reject) => {
+    const tx  = db.transaction(PHOTO_STORE, 'readonly');
+    const req = tx.objectStore(PHOTO_STORE).getAll();
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function removePendingPhoto(captureId) {
+  const db = await openPhotoDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_STORE, 'readwrite');
+    tx.objectStore(PHOTO_STORE).delete(captureId);
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+async function uploadPendingPhotos() {
+  if (!currentUser || !navigator.onLine) return;
+  const pending = await getPendingPhotos();
+  const mine    = pending.filter(p => p.userId === currentUser.uid);
+  if (!mine.length) return;
+  updatePhotoQueueStatus(mine.length, true);
+  for (const item of mine) {
+    try {
+      const storageRef = ref(storage, `captures/${item.userId}/${item.id}/photo.jpg`);
+      await uploadBytes(storageRef, item.blob, { contentType: 'image/jpeg' });
+      await removePendingPhoto(item.id);
+    } catch (err) {
+      console.error('Photo upload failed', item.id, err);
+    }
+  }
+  const remaining = (await getPendingPhotos()).filter(p => p.userId === currentUser.uid);
+  updatePhotoQueueStatus(remaining.length, false);
+}
+
+function updatePhotoQueueStatus(count, uploading) {
+  const el = document.getElementById('photo-queue-status');
+  if (!el) return;
+  if (count === 0) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.textContent   = uploading
+    ? `Uploading ${count} notebook photo${count > 1 ? 's' : ''}…`
+    : `${count} notebook photo${count > 1 ? 's' : ''} queued — will upload when online.`;
+}
+
+window.firePhotoCapture = function() {
+  if (!currentUser) { showToast('Sign in first.'); return; }
+  document.getElementById('photoInput').click();
+};
+
+window.handlePhotoSelected = async function(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+
+  const captureId = 'notebook_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+
+  // Create a placeholder capture doc immediately so it appears in the queue
+  await addDoc(collection(db, 'captures'), {
+    userId:       currentUser.uid,
+    type:         'image',
+    rawText:      '',
+    reviewStatus: 'processing',
+    source:       'notebook',
+    captureId,
+    createdAt:    serverTimestamp(),
+    capturedAt:   serverTimestamp(),
+  });
+
+  if (navigator.onLine) {
+    try {
+      const storageRef = ref(storage, `captures/${currentUser.uid}/${captureId}/photo.jpg`);
+      await uploadBytes(storageRef, file, { contentType: file.type || 'image/jpeg' });
+      showToast('Photo uploaded — Harlan is reading it.');
+    } catch (err) {
+      console.error('Upload failed, queuing offline', err);
+      await queuePhoto(file, captureId);
+      updatePhotoQueueStatus(1, false);
+      showToast('Offline — photo saved, will upload when back online.');
+    }
+  } else {
+    await queuePhoto(file, captureId);
+    updatePhotoQueueStatus(1, false);
+    showToast('Offline — photo saved, will upload when back online.');
+  }
+};
+
+// Flush queue when connectivity returns
+window.addEventListener('online', uploadPendingPhotos);
+
 // ── Claude streaming prompt ──────────────────────────────────
 async function sendPrompt(promptText) {
   if (!currentUser) {
@@ -365,4 +486,4 @@ if ('serviceWorker' in navigator) {
 }
 
 // ── Public API ───────────────────────────────────────────────
-window.HS = { sendPrompt, saveCapture, signIn, connectIntegration, runDebriefNow, saveDebriefTime };
+window.HS = { sendPrompt, saveCapture, signIn, connectIntegration, runDebriefNow, saveDebriefTime, firePhotoCapture, handlePhotoSelected };
