@@ -1,35 +1,35 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type React from "react";
-import { CalendarDays, CheckCircle2, Mail, X } from "lucide-react";
+import { AlertCircle, CalendarDays, CheckCircle2, Loader2, Mail, X } from "lucide-react";
 import type { User } from "firebase/auth";
+import { auth } from "../../firebase";
 import {
   connectGoogleIntegration,
   getIntegrationConnection,
   getUserSettings,
+  parseIntegrationOAuthReturn,
   runGoogleDebriefNow,
   updateDebriefTime,
 } from "../../data";
-import type { IntegrationConnection, IntegrationId } from "../../types";
+import type { IntegrationConnection, IntegrationId, IntegrationStatus } from "../../types";
 
 const integrations: Array<{
   id: IntegrationId;
   name: string;
   description: string;
-  scopes: string[];
   icon: React.ReactNode;
 }> = [
   {
     id: "gmail",
     name: "Gmail",
-    description: "Read-only inbox capture for follow-ups, waiting-ons, and open loops.",
-    scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    description:
+      "Harlan reads inbox context for attention items. Compose permission enables future project manager drafts — Bobby always sends.",
     icon: <Mail size={20} />,
   },
   {
     id: "calendar",
     name: "Google Calendar",
     description: "Read-only calendar context for looking ahead and time-sensitive commitments.",
-    scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
     icon: <CalendarDays size={20} />,
   },
 ];
@@ -43,6 +43,58 @@ const debriefTimes = [
   { value: "21:00", label: "9:00 PM" },
   { value: "21:30", label: "9:30 PM" },
 ];
+
+function integrationDisplayName(integrationId: IntegrationId) {
+  return integrations.find((integration) => integration.id === integrationId)?.name ?? integrationId;
+}
+
+function resolveIntegrationStatus(
+  connection: IntegrationConnection | undefined,
+  isConnecting: boolean,
+): IntegrationStatus | "connecting" {
+  if (isConnecting) return "connecting";
+  if (!connection) return "not_connected";
+  return connection.status;
+}
+
+function IntegrationStatusBadge({
+  status,
+  email,
+  errorMessage,
+}: {
+  status: IntegrationStatus | "connecting";
+  email?: string | null;
+  errorMessage?: string | null;
+}) {
+  if (status === "connecting") {
+    return (
+      <span className="integration-status connecting">
+        <Loader2 size={15} />
+        Connecting
+      </span>
+    );
+  }
+  if (status === "connected") {
+    return (
+      <>
+        <span className="integration-status connected">
+          <CheckCircle2 size={15} />
+          Connected
+        </span>
+        {email && <span className="integration-email">Connected as {email}</span>}
+      </>
+    );
+  }
+  if (status === "error") {
+    return (
+      <span className="integration-status error" title={errorMessage ?? undefined}>
+        <AlertCircle size={15} />
+        Error
+      </span>
+    );
+  }
+  return <span className="integration-status disconnected">Not Connected</span>;
+}
 
 export function SettingsPanel({
   user,
@@ -58,47 +110,58 @@ export function SettingsPanel({
   const [runningDebrief, setRunningDebrief] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  const loadConnections = useCallback(async () => {
+    const [records, settings] = await Promise.all([
+      Promise.all(
+        integrations.map(async (integration) => [
+          integration.id,
+          await getIntegrationConnection(user.uid, integration.id),
+        ] as const),
+      ),
+      getUserSettings(user.uid),
+    ]);
+    setConnections(
+      Object.fromEntries(records.filter(([, connection]) => connection)) as Partial<
+        Record<IntegrationId, IntegrationConnection>
+      >,
+    );
+    setDebriefTime(settings.debriefTime);
+  }, [user.uid]);
+
   useEffect(() => {
     let mounted = true;
 
-    async function loadConnections() {
-      const [records, settings] = await Promise.all([
-        Promise.all(
-          integrations.map(async (integration) => [
-            integration.id,
-            await getIntegrationConnection(user.uid, integration.id),
-          ] as const),
-        ),
-        getUserSettings(user.uid),
-      ]);
+    async function init() {
+      const oauthReturn = parseIntegrationOAuthReturn();
+      await loadConnections();
       if (!mounted) return;
-      setConnections(
-        Object.fromEntries(records.filter(([, connection]) => connection)) as Partial<
-          Record<IntegrationId, IntegrationConnection>
-        >,
-      );
-      setDebriefTime(settings.debriefTime);
+
+      if (oauthReturn.outcome === "success") {
+        setMessage(`${integrationDisplayName(oauthReturn.integrationId)} connected.`);
+      } else if (oauthReturn.outcome === "failed") {
+        setMessage(`${integrationDisplayName(oauthReturn.integrationId)} connection failed. Try again.`);
+      }
     }
 
-    void loadConnections();
+    void init();
     return () => {
       mounted = false;
     };
-  }, [user.uid]);
+  }, [loadConnections]);
 
   async function connect(integration: (typeof integrations)[number]) {
+    if (!auth.currentUser) {
+      setMessage("Sign in required before connecting an integration.");
+      return;
+    }
+
     setConnecting(integration.id);
     setMessage(null);
     try {
-      await connectGoogleIntegration({
-        user,
-        integrationId: integration.id,
-        scopes: integration.scopes,
-      });
+      await connectGoogleIntegration(integration.id);
       setMessage(`Redirecting to Google for ${integration.name}`);
     } catch {
       setMessage(`${integration.name} connection was not completed`);
-    } finally {
       setConnecting(null);
     }
   }
@@ -150,8 +213,10 @@ export function SettingsPanel({
 
         <div className="integration-list">
           {integrations.map((integration) => {
-            const connected = connections[integration.id]?.status === "connected";
+            const connection = connections[integration.id];
             const isConnecting = connecting === integration.id;
+            const status = resolveIntegrationStatus(connection, isConnecting);
+            const connected = status === "connected";
 
             return (
               <article key={integration.id} className="integration-item">
@@ -159,17 +224,16 @@ export function SettingsPanel({
                 <div className="integration-copy">
                   <strong>{integration.name}</strong>
                   <p>{integration.description}</p>
-                  {connected && (
-                    <span className="integration-status">
-                      <CheckCircle2 size={15} />
-                      Connected
-                    </span>
-                  )}
+                  <IntegrationStatusBadge
+                    status={status}
+                    email={connection?.email}
+                    errorMessage={connection?.errorMessage}
+                  />
                 </div>
                 <button
                   className={connected ? "secondary-button compact" : "primary-button compact"}
                   onClick={() => connect(integration)}
-                  disabled={isConnecting}
+                  disabled={isConnecting || !auth.currentUser}
                 >
                   {connected ? "Reconnect" : isConnecting ? "Connecting" : "Connect"}
                 </button>
@@ -213,8 +277,9 @@ export function SettingsPanel({
         </section>
 
         <p className="settings-note">
-          These grants are read-only. Harlan can capture context for review, but it will not send
-          email or change calendar events.
+          Harlan reads email and calendar for attention only — needs reply, overdue follow-ups,
+          manager drafts ready for review. Harlan does not send email or change calendar events.
+          Project manager agents may create Gmail drafts; sending always requires Bobby.
         </p>
         {message && <p className="settings-message">{message}</p>}
       </section>

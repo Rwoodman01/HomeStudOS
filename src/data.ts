@@ -12,10 +12,9 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import type { User } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { db, functions, storage } from "./firebase";
+import { auth, db, functions, storage } from "./firebase";
 import { savePendingMedia } from "./offlineQueue";
 import { syncCaptureMedia } from "./mediaSync";
 import type {
@@ -118,23 +117,57 @@ export async function getIntegrationConnection(
   return { id: integrationId, ...snap.data() } as IntegrationConnection;
 }
 
-export async function connectGoogleIntegration(params: {
-  user: User;
-  integrationId: IntegrationId;
-  scopes: string[];
-}) {
-  const callable = httpsCallable<
-    { integrationId: IntegrationId; scopes: string[] },
-    { url: string }
-  >(functions, "getGoogleOAuthUrl");
-  const result = await callable({
-    integrationId: params.integrationId,
-    scopes: params.scopes,
-  });
+export async function connectGoogleIntegration(integrationId: IntegrationId) {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("Sign in required.");
+  }
+
+  await user.getIdToken(true);
+
+  const callable = httpsCallable<{ integrationId: IntegrationId }, { url: string }>(
+    functions,
+    "getGoogleOAuthUrl",
+  );
+  const result = await callable({ integrationId });
   window.location.assign(result.data.url);
 }
 
+export type IntegrationOAuthReturn =
+  | { outcome: "success"; integrationId: IntegrationId }
+  | { outcome: "failed"; integrationId: IntegrationId }
+  | { outcome: null };
+
+export function parseIntegrationOAuthReturn(): IntegrationOAuthReturn {
+  const params = new URLSearchParams(window.location.search);
+  const connected = params.get("connected");
+  const integration = params.get("integration");
+
+  params.delete("settings");
+  params.delete("connected");
+  params.delete("integration");
+
+  const nextSearch = params.toString();
+  const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+  window.history.replaceState({}, "", nextUrl);
+
+  if (connected === "gmail" || connected === "calendar") {
+    return { outcome: "success", integrationId: connected };
+  }
+  if (connected === "failed" && (integration === "gmail" || integration === "calendar")) {
+    return { outcome: "failed", integrationId: integration };
+  }
+  return { outcome: null };
+}
+
 export async function runGoogleDebriefNow() {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("Sign in required.");
+  }
+
+  await user.getIdToken(true);
+
   const callable = httpsCallable<Record<string, never>, { imported: number }>(
     functions,
     "runGoogleDebriefNow",

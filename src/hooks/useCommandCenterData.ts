@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { onSnapshot } from "firebase/firestore";
+import { onSnapshot, type FirestoreError } from "firebase/firestore";
 import {
   actionsQuery,
   assetsQuery,
@@ -11,6 +11,21 @@ import { registerMediaSync } from "../mediaSync";
 import type { Action, Asset, Capture, Decision, WaitingOn } from "../types";
 import { convertDoc } from "../utils/convertDoc";
 
+function logListenerError(
+  listenerName: string,
+  queryPath: string,
+  userId: string,
+  error: FirestoreError,
+) {
+  console.error("[Firestore listener failed]", {
+    listenerName,
+    queryPath,
+    userId,
+    code: error.code,
+    message: error.message,
+  });
+}
+
 export function useCommandCenterData(userId: string) {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
@@ -20,21 +35,41 @@ export function useCommandCenterData(userId: string) {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubCaptures = onSnapshot(capturesQuery(userId), (snapshot) => {
-      setCaptures(snapshot.docs.map((doc) => convertDoc<Capture>(doc)));
-    });
-    const unsubActions = onSnapshot(actionsQuery(userId), (snapshot) => {
-      setActions(snapshot.docs.map((doc) => convertDoc<Action>(doc)));
-    });
-    const unsubWaitingOns = onSnapshot(waitingOnsQuery(userId), (snapshot) => {
-      setWaitingOns(snapshot.docs.map((doc) => convertDoc<WaitingOn>(doc)));
-    });
-    const unsubAssets = onSnapshot(assetsQuery(userId), (snapshot) => {
-      setAssets(snapshot.docs.map((doc) => convertDoc<Asset>(doc)));
-    });
-    const unsubDecisions = onSnapshot(decisionsQuery(userId), (snapshot) => {
-      setDecisions(snapshot.docs.map((doc) => convertDoc<Decision>(doc)));
-    });
+    const unsubCaptures = onSnapshot(
+      capturesQuery(userId),
+      (snapshot) => {
+        setCaptures(snapshot.docs.map((doc) => convertDoc<Capture>(doc)));
+      },
+      (error) => logListenerError("captures", "captures", userId, error),
+    );
+    const unsubActions = onSnapshot(
+      actionsQuery(userId),
+      (snapshot) => {
+        setActions(snapshot.docs.map((doc) => convertDoc<Action>(doc)));
+      },
+      (error) => logListenerError("actions", "actions", userId, error),
+    );
+    const unsubWaitingOns = onSnapshot(
+      waitingOnsQuery(userId),
+      (snapshot) => {
+        setWaitingOns(snapshot.docs.map((doc) => convertDoc<WaitingOn>(doc)));
+      },
+      (error) => logListenerError("waitingOns", "waitingOns", userId, error),
+    );
+    const unsubAssets = onSnapshot(
+      assetsQuery(userId),
+      (snapshot) => {
+        setAssets(snapshot.docs.map((doc) => convertDoc<Asset>(doc)));
+      },
+      (error) => logListenerError("assets", "assets", userId, error),
+    );
+    const unsubDecisions = onSnapshot(
+      decisionsQuery(userId),
+      (snapshot) => {
+        setDecisions(snapshot.docs.map((doc) => convertDoc<Decision>(doc)));
+      },
+      (error) => logListenerError("decisions", "decisions", userId, error),
+    );
     return () => {
       unsubCaptures();
       unsubActions();

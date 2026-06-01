@@ -1,15 +1,23 @@
-import { initializeApp } from "firebase-admin/app";
+import { getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
-import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { onCall } from "firebase-functions/v2/https";
+import { onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret, defineString } from "firebase-functions/params";
 import { logger } from "firebase-functions";
 
-initializeApp();
+if (!getApps().length) {
+  initializeApp();
+}
 
-const db = getFirestore();
-const bucket = getStorage().bucket();
+function db() {
+  return getFirestore();
+}
+
+function bucket() {
+  return getStorage().bucket();
+}
 
 const anthropicApiKey = defineSecret("ANTHROPIC_API_KEY");
 const googleOAuthClientSecret = defineSecret("GOOGLE_OAUTH_CLIENT_SECRET");
@@ -27,6 +35,16 @@ const OUTPUT_COST_PER_TOKEN = 1.25 / 1_000_000;
 type ProjectId = "outpost" | "gifted" | "kv" | "homestead";
 type ProposalType = "action" | "asset" | "decision" | "archive";
 type IntegrationId = "gmail" | "calendar";
+
+const GOOGLE_SCOPE_PREFIX = "https://www.googleapis.com/auth/";
+
+const INTEGRATION_SCOPES: Record<IntegrationId, string[]> = {
+  gmail: [
+    `${GOOGLE_SCOPE_PREFIX}gmail.readonly`,
+    `${GOOGLE_SCOPE_PREFIX}gmail.compose`,
+  ],
+  calendar: [`${GOOGLE_SCOPE_PREFIX}calendar.events.readonly`],
+};
 
 type AiProposal = {
   captureId: string;
@@ -149,24 +167,119 @@ Classification rules:
 
 Voice: direct, calm, plain. No fluff. No motivational copy. Preserve continuity and say what is what.`;
 
+const STREAM_MODEL = "claude-sonnet-4-6";
+
+/** HTTP: stream a Claude response back to the new PWA dashboard. */
+export const claudeStream = onRequest(
+  { secrets: [anthropicApiKey], timeoutSeconds: 120, cors: false },
+  async (request, response) => {
+    if (request.method !== "POST") {
+      response.status(405).send("Method not allowed");
+      return;
+    }
+
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) {
+      response.status(401).send("Unauthorized");
+      return;
+    }
+
+    try {
+      // Lazy-load auth to avoid module-level import hang
+      const { getAuth } = await import("firebase-admin/auth");
+      await getAuth().verifyIdToken(authHeader.slice(7));
+    } catch {
+      response.status(401).send("Invalid token");
+      return;
+    }
+
+    const { prompt } = request.body as { prompt?: string };
+    if (!prompt || typeof prompt !== "string") {
+      response.status(400).send("prompt required");
+      return;
+    }
+
+    const apiKey = anthropicApiKey.value();
+
+    response.setHeader("Content-Type", "text/event-stream");
+    response.setHeader("Cache-Control", "no-cache");
+    response.setHeader("Connection", "keep-alive");
+
+    let upstreamResponse: Response;
+    try {
+      upstreamResponse = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: STREAM_MODEL,
+          max_tokens: 4096,
+          stream: true,
+          system: SYSTEM_PROMPT,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+    } catch (err) {
+      logger.error("Anthropic fetch failed", err);
+      response.write("data: [DONE]\n\n");
+      response.end();
+      return;
+    }
+
+    if (!upstreamResponse.ok || !upstreamResponse.body) {
+      logger.error("Anthropic non-OK", { status: upstreamResponse.status });
+      response.write("data: [DONE]\n\n");
+      response.end();
+      return;
+    }
+
+    const reader  = upstreamResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6);
+        if (data === "[DONE]") continue;
+        try {
+          const event = JSON.parse(data) as { type?: string; delta?: { type?: string; text?: string } };
+          if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
+            response.write(`data: ${JSON.stringify({ text: event.delta.text })}\n\n`);
+          }
+        } catch {
+          // skip malformed SSE events
+        }
+      }
+    }
+
+    response.write("data: [DONE]\n\n");
+    response.end();
+  },
+);
+
 export const getGoogleOAuthUrl = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
 
-  const { integrationId, scopes } = request.data as {
-    integrationId?: IntegrationId;
-    scopes?: string[];
-  };
+  const { integrationId } = request.data as { integrationId?: IntegrationId };
 
   if (!integrationId || !["gmail", "calendar"].includes(integrationId)) {
     throw new HttpsError("invalid-argument", "Valid integrationId required.");
   }
-  if (!Array.isArray(scopes) || scopes.length === 0) {
-    throw new HttpsError("invalid-argument", "At least one scope required.");
-  }
 
-  const stateRef = db.collection("oauthStates").doc();
+  const scopes = INTEGRATION_SCOPES[integrationId];
+
+  const stateRef = db().collection("oauthStates").doc();
   await stateRef.set({
     userId: request.auth.uid,
     integrationId,
@@ -199,7 +312,7 @@ export const googleOAuthCallback = onRequest(
       return;
     }
 
-    const stateRef = db.collection("oauthStates").doc(state);
+    const stateRef = db().collection("oauthStates").doc(state);
     const stateSnap = await stateRef.get();
     if (!stateSnap.exists) {
       response.status(400).send("Invalid OAuth state.");
@@ -224,7 +337,7 @@ export const googleOAuthCallback = onRequest(
         throw new Error(token.error_description || token.error || "Missing access token");
       }
 
-      const existingTokenRef = db.collection("googleOAuthTokens").doc(stateData.userId);
+      const existingTokenRef = db().collection("googleOAuthTokens").doc(stateData.userId);
       const existingTokenSnap = await existingTokenRef.get();
       const existingScopes = Array.isArray(existingTokenSnap.data()?.scopes)
         ? (existingTokenSnap.data()?.scopes as string[])
@@ -241,7 +354,9 @@ export const googleOAuthCallback = onRequest(
         { merge: true },
       );
 
-      await db
+      const email = await fetchGoogleUserEmail(token.access_token);
+
+      await db()
         .collection("users")
         .doc(stateData.userId)
         .collection("integrations")
@@ -250,9 +365,11 @@ export const googleOAuthCallback = onRequest(
           {
             userId: stateData.userId,
             status: "connected",
-            scopes: stateData.scopes,
+            scopes,
+            email,
             connectedAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
+            errorMessage: FieldValue.delete(),
           },
           { merge: true },
         );
@@ -269,7 +386,24 @@ export const googleOAuthCallback = onRequest(
         status: "failed",
         completedAt: FieldValue.serverTimestamp(),
       });
-      response.redirect(`${appBaseUrl.value()}?settings=integrations&connected=failed`);
+      await db()
+        .collection("users")
+        .doc(stateData.userId)
+        .collection("integrations")
+        .doc(stateData.integrationId)
+        .set(
+          {
+            userId: stateData.userId,
+            status: "error",
+            scopes: stateData.scopes,
+            errorMessage: "Connection failed. Try again.",
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      response.redirect(
+        `${appBaseUrl.value()}?settings=integrations&connected=failed&integration=${stateData.integrationId}`,
+      );
     }
   },
 );
@@ -281,7 +415,7 @@ export const syncGoogleIntegrations = onSchedule(
     secrets: [googleOAuthClientSecret],
   },
   async () => {
-    const tokensSnap = await db.collection("googleOAuthTokens").get();
+    const tokensSnap = await db().collection("googleOAuthTokens").get();
     let userCount = 0;
     let captureCount = 0;
 
@@ -323,7 +457,7 @@ export const runGoogleDebriefNow = onCall(
       throw new HttpsError("unauthenticated", "Sign in required.");
     }
 
-    const tokenDoc = await db.collection("googleOAuthTokens").doc(request.auth.uid).get();
+    const tokenDoc = await db().collection("googleOAuthTokens").doc(request.auth.uid).get();
     const token = tokenDoc.data();
     const refreshToken = token?.refreshToken as string | undefined;
     const scopes = Array.isArray(token?.scopes) ? (token?.scopes as string[]) : [];
@@ -355,7 +489,7 @@ export const runAiReview = onCall(
     }
 
     const userId = request.auth.uid;
-    const capturesSnap = await db
+    const capturesSnap = await db()
       .collection("captures")
       .where("userId", "==", userId)
       .where("reviewStatus", "==", "unreviewed")
@@ -368,7 +502,7 @@ export const runAiReview = onCall(
     }
 
     const captureIds = capturesSnap.docs.map((doc) => doc.id);
-    const runRef = await db.collection("reviewRuns").add({
+    const runRef = await db().collection("reviewRuns").add({
       userId,
       status: "running",
       captureIds,
@@ -394,7 +528,7 @@ export const runAiReview = onCall(
       const { proposals, tokenIn, tokenOut } = await callAnthropicReview(apiKey, capturePayload);
 
       const proposalById = new Map(proposals.map((p) => [p.captureId, p]));
-      const batch = db.batch();
+      const batch = db().batch();
 
       for (const doc of capturesSnap.docs) {
         const data = doc.data();
@@ -517,7 +651,7 @@ function fallbackProposal(captureId: string, rawText: string): Omit<AiProposal, 
 
 async function logAiUsage(userId: string, tokenIn: number, tokenOut: number, costUsd: number) {
   const monthKey = new Date().toISOString().slice(0, 7);
-  const usageRef = db.collection("aiUsage").doc(`${userId}_${monthKey}`);
+  const usageRef = db().collection("aiUsage").doc(`${userId}_${monthKey}`);
 
   await usageRef.set(
     {
@@ -575,19 +709,26 @@ async function refreshGoogleAccessToken(refreshToken: string): Promise<string> {
   return token.access_token;
 }
 
+function hasCalendarReadScope(scopes: string[]) {
+  return scopes.some(
+    (scope) =>
+      scope.includes("calendar.readonly") || scope.includes("calendar.events.readonly"),
+  );
+}
+
 async function syncGoogleForUser(userId: string, accessToken: string, scopes: string[]) {
   let imported = 0;
-  if (scopes.includes("https://www.googleapis.com/auth/gmail.readonly")) {
+  if (scopes.includes(`${GOOGLE_SCOPE_PREFIX}gmail.readonly`)) {
     imported += await syncGmailForUser(userId, accessToken);
   }
-  if (scopes.includes("https://www.googleapis.com/auth/calendar.readonly")) {
+  if (hasCalendarReadScope(scopes)) {
     imported += await syncCalendarForUser(userId, accessToken);
   }
   return imported;
 }
 
 async function shouldRunDebriefNow(userId: string) {
-  const settingsSnap = await db.collection("users").doc(userId).collection("settings").doc("harlan").get();
+  const settingsSnap = await db().collection("users").doc(userId).collection("settings").doc("harlan").get();
   const settings = settingsSnap.data();
   const debriefTime = typeof settings?.debriefTime === "string" ? settings.debriefTime : "20:30";
   const timezone = typeof settings?.timezone === "string" ? settings.timezone : "America/Halifax";
@@ -629,7 +770,7 @@ async function syncGmailForUser(userId: string, accessToken: string) {
     const snippet = latestMessage.snippet || firstMessage.snippet || "";
     const captureId = `gmail_${thread.id}`;
 
-    const captureRef = db.collection("captures").doc(captureId);
+    const captureRef = db().collection("captures").doc(captureId);
     const existing = await captureRef.get();
     if (existing.exists) continue;
 
@@ -671,7 +812,7 @@ async function syncCalendarForUser(userId: string, accessToken: string) {
   for (const event of data.items ?? []) {
     if (!event.id || !event.summary) continue;
 
-    const captureRef = db.collection("captures").doc(`calendar_${event.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
+    const captureRef = db().collection("captures").doc(`calendar_${event.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`);
     const existing = await captureRef.get();
     if (existing.exists) continue;
 
@@ -708,6 +849,19 @@ async function googleApi<T>(url: string, accessToken: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function fetchGoogleUserEmail(accessToken: string): Promise<string | null> {
+  try {
+    const data = await googleApi<{ email?: string }>(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      accessToken,
+    );
+    return typeof data.email === "string" ? data.email : null;
+  } catch (error) {
+    logger.warn("Could not fetch Google user email", error);
+    return null;
+  }
+}
+
 function gmailHeader(message: NonNullable<GmailThreadResponse["messages"]>[number], name: string) {
   return message.payload?.headers?.find((header) => header.name.toLowerCase() === name.toLowerCase())?.value;
 }
@@ -724,7 +878,7 @@ export const exportAssetToObsidian = onCall(async (request) => {
   }
 
   const userId = request.auth.uid;
-  const assetRef = db.collection("assets").doc(assetId);
+  const assetRef = db().collection("assets").doc(assetId);
   const assetSnap = await assetRef.get();
 
   if (!assetSnap.exists || assetSnap.data()?.userId !== userId) {
@@ -738,7 +892,7 @@ export const exportAssetToObsidian = onCall(async (request) => {
   const markdown = renderAssetMarkdown(asset);
 
   const storagePath = `obsidian-export/${userId}/${obsidianPath}`;
-  await bucket.file(storagePath).save(markdown, {
+  await bucket().file(storagePath).save(markdown, {
     contentType: "text/markdown",
     metadata: { cacheControl: "no-cache" },
   });
@@ -764,7 +918,7 @@ export const exportDecisionToObsidian = onCall(async (request) => {
   }
 
   const userId = request.auth.uid;
-  const decisionRef = db.collection("decisions").doc(decisionId);
+  const decisionRef = db().collection("decisions").doc(decisionId);
   const decisionSnap = await decisionRef.get();
 
   if (!decisionSnap.exists || decisionSnap.data()?.userId !== userId) {
@@ -777,7 +931,7 @@ export const exportDecisionToObsidian = onCall(async (request) => {
   const entry = renderDecisionEntry(decision);
 
   const storagePath = `obsidian-export/${userId}/${obsidianPath}`;
-  const file = bucket.file(storagePath);
+  const file = bucket().file(storagePath);
   let existing = "";
   try {
     const [contents] = await file.download();

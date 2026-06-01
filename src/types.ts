@@ -120,6 +120,7 @@ export type IntegrationConnection = {
   status: IntegrationStatus;
   scopes: string[];
   email?: string | null;
+  errorMessage?: string | null;
   connectedAt?: Date;
   updatedAt?: Date;
 };

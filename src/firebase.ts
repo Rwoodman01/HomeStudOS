@@ -18,6 +18,7 @@ export const auth = getAuth(firebaseApp);
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(firebaseApp);
 export const storage = getStorage(firebaseApp);
+// Auth must initialize before Functions so callable requests include the ID token.
 export const functions = getFunctions(firebaseApp, "us-central1");
 
 enableIndexedDbPersistence(db).catch(() => {

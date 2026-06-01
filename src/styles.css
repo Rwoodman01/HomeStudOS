@@ -956,9 +956,32 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #2f4b3d;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.integration-status.connected {
+  color: #2f4b3d;
+}
+
+.integration-status.error {
+  color: #8b3a2a;
+}
+
+.integration-status.connecting {
+  color: #6a5f53;
+}
+
+.integration-status.disconnected {
+  color: #8a7f74;
+}
+
+.integration-email {
+  display: block;
+  margin-top: 4px;
+  color: #6a5f53;
+  font-size: 0.76rem;
+  font-weight: 600;
 }
 
 .secondary-button.compact {

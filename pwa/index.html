@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1e1408">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="HomeStud">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<title>HomeStud OS</title>
+<style>
+  :root {
+    color-scheme: light;
+    --paper:  #f4ede0;
+    --paper2: #ede4d0;
+    --ink:    #1e1408;
+    --faded:  #9a8060;
+    --rule:   #c8b898;
+    --red:    #7a1515;
+    --stamp:  #5a3a10;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Georgia, 'Times New Roman', serif;
+    min-height: 100vh;
+    background-image: radial-gradient(circle, #c8b89860 1px, transparent 1px);
+    background-size: 20px 20px;
+    background-color: var(--paper);
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .journal {
+    max-width: 760px;
+    margin: 0 auto;
+    background: var(--paper);
+    background-image: radial-gradient(circle, #c8b89840 1px, transparent 1px);
+    background-size: 20px 20px;
+    min-height: 100vh;
+    padding: 32px 36px 80px;
+    position: relative;
+  }
+
+  .journal::before {
+    content: '';
+    position: absolute;
+    left: 68px; top: 0; bottom: 0;
+    width: 1px;
+    background: #e0a09060;
+  }
+
+  /* ── MASTHEAD ── */
+  .masthead {
+    text-align: center;
+    padding-bottom: 18px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .masthead .os-title {
+    font-size: 11px; letter-spacing: 4px; text-transform: uppercase;
+    color: var(--faded); margin-bottom: 4px;
+  }
+  .masthead h1 { font-size: 28px; font-weight: bold; letter-spacing: -.5px; line-height: 1; }
+  .masthead .dateline { font-size: 12px; color: var(--faded); font-style: italic; margin-top: 4px; }
+  .auth-strip {
+    display: flex; align-items: center; justify-content: flex-end;
+    gap: 10px; margin-top: 8px;
+  }
+  #auth-info { font-size: 11px; color: var(--faded); font-style: italic; }
+  #auth-btn {
+    font-family: Georgia, serif; font-size: 10px; letter-spacing: 1.5px;
+    text-transform: uppercase; padding: 4px 10px;
+    background: none; color: var(--faded); border: 1px solid var(--rule); cursor: pointer;
+  }
+  #auth-btn:hover { color: var(--ink); border-color: var(--ink); }
+
+  /* ── TABS ── */
+  .tab-strip {
+    display: flex; gap: 2px; margin-bottom: 0; position: relative;
+    overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .tab-strip::-webkit-scrollbar { display: none; }
+  .tab-strip::after {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+    height: 2px; background: var(--ink); z-index: 0;
+  }
+  .tab {
+    padding: 6px 14px 8px; font-family: Georgia, serif; font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase; color: var(--faded);
+    background: var(--paper2); border: 1.5px solid var(--rule); border-bottom: none;
+    cursor: pointer; position: relative; z-index: 1; white-space: nowrap; flex-shrink: 0;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    color: var(--ink); background: var(--paper); border-color: var(--ink);
+    border-bottom: 2px solid var(--paper); margin-bottom: -2px;
+    font-weight: bold; z-index: 3;
+  }
+
+  /* ── PAGES ── */
+  .page {
+    display: none; border: 1.5px solid var(--ink); border-top: none;
+    padding: 28px 32px 40px; background: var(--paper); position: relative; z-index: 2;
+  }
+  .page.active { display: block; }
+  .page-title { font-size: 20px; font-weight: bold; letter-spacing: -.3px; margin-bottom: 2px; }
+  .page-sub {
+    font-size: 12px; color: var(--faded); font-style: italic;
+    margin-bottom: 20px; padding-bottom: 14px; border-bottom: 1px solid var(--rule);
+  }
+  .section-head {
+    font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--faded); margin: 22px 0 8px;
+  }
+  .section-head:first-of-type { margin-top: 0; }
+
+  /* ── ENTRIES ── */
+  .entry {
+    display: flex; align-items: baseline; padding: 7px 0;
+    border-bottom: 1px solid var(--rule); cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .entry:last-child { border-bottom: none; }
+  .entry:hover, .entry:active { background: #e8dfc840; }
+  .entry:hover .entry-arrow, .entry:active .entry-arrow { color: var(--ink); }
+  .entry-bullet { font-size: 16px; color: var(--faded); width: 20px; flex-shrink: 0; line-height: 1.4; }
+  .entry-body   { flex: 1; padding: 0 8px; }
+  .entry-title  { font-size: 14px; color: var(--ink); line-height: 1.4; }
+  .entry-note   { font-size: 11px; color: var(--faded); font-style: italic; line-height: 1.3; margin-top: 1px; }
+  .entry-arrow  { font-size: 14px; color: var(--rule); flex-shrink: 0; }
+
+  /* ── HARLAN BLOCK ── */
+  .harlan-block {
+    background: var(--ink); color: var(--paper);
+    padding: 16px 20px; margin-bottom: 22px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .harlan-block .h-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: #c8a84890; margin-bottom: 4px; }
+  .harlan-block .h-name  { font-size: 17px; font-weight: bold; color: #f0e0c0; }
+  .harlan-block .h-desc  { font-size: 11px; color: #9a8878; font-style: italic; margin-top: 2px; }
+  .harlan-block .h-btn {
+    margin-left: auto; background: none; border: 1px solid #c8a84870;
+    color: #c8a848; font-family: Georgia, serif; font-size: 11px;
+    letter-spacing: 1.5px; text-transform: uppercase; padding: 7px 14px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .harlan-block .h-btn:hover { background: #c8a848; color: var(--ink); border-color: #c8a848; }
+
+  /* ── CAPTURE ── */
+  .capture-row { display: flex; margin-bottom: 24px; border: 1px solid var(--ink); }
+  .capture-row input {
+    flex: 1; padding: 9px 13px; border: none; background: transparent;
+    font-family: Georgia, serif; font-size: 13px; color: var(--ink); outline: none;
+  }
+  .capture-row input::placeholder { color: var(--faded); font-style: italic; }
+  .capture-row button {
+    padding: 9px 16px; background: var(--ink); color: var(--paper); border: none;
+    font-family: Georgia, serif; font-size: 11px; letter-spacing: 1.5px;
+    text-transform: uppercase; cursor: pointer; white-space: nowrap;
+  }
+
+  /* ── DISPATCH ── */
+  .dispatch-section { margin-bottom: 20px; }
+  .dispatch-label {
+    font-size: 10px; letter-spacing: 2.5px; text-transform: uppercase;
+    color: var(--faded); margin-bottom: 2px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dispatch-label.urgent { color: var(--red); }
+  .dispatch-label::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
+  .dispatch-empty { font-size: 12px; color: var(--faded); font-style: italic; padding: 6px 0 2px; }
+  .dispatch-item {
+    font-size: 13px; color: var(--ink); padding: 5px 0;
+    border-bottom: 1px solid var(--rule); line-height: 1.4;
+  }
+  .dispatch-item:last-child { border-bottom: none; }
+  .dispatch-item-who { color: var(--faded); font-style: italic; }
+
+  .dispatch-ask {
+    display: inline-block; margin-top: 4px; font-size: 11px; color: var(--faded);
+    cursor: pointer; border-bottom: 1px dashed var(--rule); background: none;
+    border-top: none; border-left: none; border-right: none;
+    font-family: Georgia, serif; padding: 0;
+  }
+  .dispatch-ask:hover { color: var(--ink); border-bottom-color: var(--ink); }
+
+  /* ── ROUTINES ── */
+  .routine-block { border: 1px solid var(--rule); padding: 14px 16px; margin-bottom: 12px; background: var(--paper2); }
+  .routine-header { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .routine-name  { font-size: 14px; font-weight: bold; color: var(--ink); }
+  .routine-badge { font-size: 9px; letter-spacing: 2px; text-transform: uppercase; padding: 2px 6px; border: 1px solid var(--rule); color: var(--faded); }
+  .routine-badge.on { border-color: #3a6a2a; color: #3a6a2a; background: #eaf4e8; }
+  .routine-desc  { font-size: 12px; color: var(--faded); font-style: italic; margin-bottom: 10px; }
+  .routine-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .routine-controls label { font-size: 11px; color: var(--faded); text-transform: uppercase; }
+  .routine-controls input[type="time"],
+  .routine-controls select {
+    font-family: Georgia, serif; font-size: 12px; padding: 4px 7px;
+    border: 1px solid var(--rule); background: var(--paper); color: var(--ink); outline: none;
+  }
+  .routine-save {
+    font-family: Georgia, serif; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+    padding: 5px 12px; background: var(--ink); color: var(--paper); border: none;
+    cursor: pointer; margin-left: 10px;
+  }
+  .routine-off {
+    font-family: Georgia, serif; font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase;
+    padding: 5px 10px; background: none; color: var(--faded);
+    border: 1px solid var(--rule); cursor: pointer;
+  }
+
+  /* ── MOBILE ── */
+  @media (max-width: 500px) {
+    .journal { padding: 20px 16px 80px; }
+    .journal::before { display: none; }
+    .page { padding: 20px 16px 30px; }
+    .masthead h1 { font-size: 22px; }
+    .tab { font-size: 10px; padding: 5px 10px 7px; }
+  }
+</style>
+</head>
+<body>
+<div class="journal">
+
+  <div class="masthead">
+    <div class="os-title">Field Notes &amp; Operations</div>
+    <h1>HomeStud OS</h1>
+    <div class="dateline" id="dateline"></div>
+    <div class="auth-strip">
+      <span id="auth-info"></span>
+      <button id="auth-btn">Connect Google</button>
+    </div>
+  </div>
+
+  <div class="tab-strip">
+    <div class="tab active" onclick="switchTab('dispatch',this)">Dispatch</div>
+    <div class="tab" onclick="switchTab('outpost',this)">The Outpost</div>
+    <div class="tab" onclick="switchTab('gifted',this)">Gifted</div>
+    <div class="tab" onclick="switchTab('kv',this)">KV</div>
+    <div class="tab" onclick="switchTab('homestead',this)">Homestead</div>
+    <div class="tab" onclick="switchTab('finance',this)">Finance</div>
+    <div class="tab" onclick="switchTab('book',this)">The Book</div>
+    <div class="tab" onclick="switchTab('settings',this)" style="margin-left:auto;">⚙ Settings</div>
+  </div>
+
+  <!-- DISPATCH -->
+  <div class="page active" id="page-dispatch">
+    <div class="harlan-block">
+      <div>
+        <div class="h-label">Foreman</div>
+        <div class="h-name">Harlan</div>
+        <div class="h-desc">Sees the whole system. Surfaces what matters. Owns continuity.</div>
+      </div>
+      <button class="h-btn" onclick="HS.sendPrompt('Run Harlan. Check across all projects for open loops, waiting ons, overdue items, project drift, and financial flags. Give me the full Dispatch.')">Run Harlan</button>
+    </div>
+
+    <div class="capture-row">
+      <input type="text" id="captureInput" placeholder="Capture a thought, task, or follow-up…" onkeydown="if(event.key==='Enter')fireCapture()">
+      <button onclick="fireCapture()">Capture</button>
+    </div>
+
+    <div class="dispatch-section">
+      <div class="dispatch-label urgent">Urgent</div>
+      <div id="dispatch-urgent"><div class="dispatch-empty">Nothing flagged.</div></div>
+      <button class="dispatch-ask" onclick="HS.sendPrompt('What is urgent right now across The Outpost, Gifted, KV Properties, the homestead, and finances?')">→ Ask Harlan</button>
+    </div>
+    <div class="dispatch-section">
+      <div class="dispatch-label">Top Five</div>
+      <div id="dispatch-top5"><div class="dispatch-empty">Not set for today.</div></div>
+      <button class="dispatch-ask" onclick="HS.sendPrompt('Help me set my Top 5 for today. Check my calendar, open loops, and what matters most right now.')">→ Set Top 5</button>
+    </div>
+    <div class="dispatch-section">
+      <div class="dispatch-label">Waiting On</div>
+      <div id="dispatch-waiting"><div class="dispatch-empty">Nothing tracked.</div></div>
+      <button class="dispatch-ask" onclick="HS.sendPrompt('What am I waiting on? Check my email for threads needing a reply or follow-up overdue.')">→ Check Email</button>
+    </div>
+    <div class="dispatch-section">
+      <div class="dispatch-label">Captures to Review</div>
+      <div id="dispatch-captures"><div class="dispatch-empty">Nothing pending.</div></div>
+      <button class="dispatch-ask" onclick="HS.sendPrompt('I have captures to review. Help me process them — categorize each one, assign to a project, or turn into an action.')">→ Process</button>
+    </div>
+    <div class="dispatch-section">
+      <div class="dispatch-label">Looking Ahead</div>
+      <div id="dispatch-ahead"><div class="dispatch-empty">—</div></div>
+      <button class="dispatch-ask" onclick="HS.sendPrompt('What is coming up in the next 7 days I should be aware of or prepare for?')">→ Check Calendar</button>
+    </div>
+    <div class="dispatch-section">
+      <div class="dispatch-label">Financial Attention</div>
+      <div class="dispatch-empty">No flags.</div>
+      <button class="dispatch-ask" onclick="HS.sendPrompt('Run a financial attention check. Bills due, invoices not sent, invoices unpaid, cash flow concerns.')">→ Finance Check</button>
+    </div>
+    <div class="dispatch-section">
+      <div class="dispatch-label">Project Pulse</div>
+      <div class="dispatch-empty">No drift detected.</div>
+      <button class="dispatch-ask" onclick="HS.sendPrompt('Give me a project pulse. What is moving, what is stalled, what needs attention across The Outpost, Gifted, KV, and Kill the Drift?')">→ Pulse Check</button>
+    </div>
+  </div>
+
+  <!-- THE OUTPOST -->
+  <div class="page" id="page-outpost">
+    <div class="page-title">The Outpost</div>
+    <div class="page-sub">Men's accountability platform — members, podcast, content, community.</div>
+
+    <div class="section-head">Email &amp; Comms</div>
+    <div class="entry" onclick="HS.sendPrompt('Check my email for anything related to The Outpost. Surface what needs a reply, follow-ups overdue, or member inquiries.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Check Outpost email</div><div class="entry-note">Reply-needed, follow-ups, member messages</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to draft a message to Outpost members. Help me write it — newsletter, update, or direct outreach.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Draft member message</div><div class="entry-note">Newsletter, update, or direct outreach</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Podcast</div>
+    <div class="entry" onclick="HS.sendPrompt('Where is the Outpost podcast at? Next episode status, outreach pipeline, what needs to happen next.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Podcast status</div><div class="entry-note">Episodes, pipeline, next steps</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('Help me draft outreach to a podcast guest for The Outpost. Who are we targeting and what should I say?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Draft guest outreach</div><div class="entry-note">Cold outreach to prospective guests</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I have a podcast episode to prep for The Outpost. Help me build a run sheet and talking points.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Episode prep</div><div class="entry-note">Run sheet, talking points, guest research</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Content</div>
+    <div class="entry" onclick="HS.sendPrompt('Help me plan Outpost content. What should I be posting, when, on what platforms, and what topics fit the audience right now?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Content plan</div><div class="entry-note">Topics, platforms, calendar</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to write content for The Outpost. Help me draft it — social post, email, or article.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Write a piece</div><div class="entry-note">Post, email, or long-form</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Members &amp; Ops</div>
+    <div class="entry" onclick="HS.sendPrompt('What is the member status for The Outpost? Who is active, who has gone quiet, any retention concerns?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Member pulse</div><div class="entry-note">Active, quiet, retention flags</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('What are the open action items and next priorities for The Outpost right now?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Open items &amp; next priorities</div><div class="entry-note">Actions, decisions, what moves next</div></div><div class="entry-arrow">→</div>
+    </div>
+  </div>
+
+  <!-- GIFTED -->
+  <div class="page" id="page-gifted">
+    <div class="page-title">Gifted</div>
+    <div class="page-sub">Peer-to-peer skill barter app. Partnership with Michael Whitaker, Atlanta.</div>
+
+    <div class="section-head">Build &amp; Product</div>
+    <div class="entry" onclick="HS.sendPrompt('Where is Gifted at in the build? Current status, what is next, what is blocking us.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Build status</div><div class="entry-note">Current state, next steps, blockers</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('Help me think through a product decision for Gifted.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Work through a product decision</div><div class="entry-note">Feature, direction, or trade-off</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Partnership — Michael</div>
+    <div class="entry" onclick="HS.sendPrompt('Check my email for anything from Michael Whitaker or related to Gifted. What needs a reply or follow-up?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Email from Michael</div><div class="entry-note">Threads, follow-ups, pending replies</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to draft a message to Michael Whitaker about Gifted. Help me write it.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Draft to Michael</div><div class="entry-note">Update, question, or next step</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('What are the open partnership questions or decisions between me and Michael on Gifted?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Open partnership items</div><div class="entry-note">Decisions, alignment, outstanding</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Brand &amp; Launch</div>
+    <div class="entry" onclick="HS.sendPrompt('Help me think through the Gifted brand — positioning, voice, and how we show up.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Brand &amp; positioning</div><div class="entry-note">Voice, identity, how we show up</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('What is the go-to-market plan for Gifted? How do we launch and get first users?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Go-to-market plan</div><div class="entry-note">Launch, first users, growth</div></div><div class="entry-arrow">→</div>
+    </div>
+  </div>
+
+  <!-- KV -->
+  <div class="page" id="page-kv">
+    <div class="page-title">KV Properties</div>
+    <div class="page-sub">Maintenance Manager. Logs, contracts, tenant comms, invoicing.</div>
+
+    <div class="section-head">Maintenance</div>
+    <div class="entry" onclick="HS.sendPrompt('What are the open maintenance requests or issues at KV Properties? What needs action or follow-up?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Open maintenance items</div><div class="entry-note">Requests, issues, follow-ups</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to log a maintenance job at KV Properties. Help me capture it properly — work done, materials, time.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Log a job</div><div class="entry-note">Work done, materials, time</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to schedule a maintenance task at KV Properties. Help me plan it.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Schedule a task</div><div class="entry-note">Book, plan, or assign a job</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Comms</div>
+    <div class="entry" onclick="HS.sendPrompt('Check my email for anything related to KV Properties. Flag what needs a reply or follow-up.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">KV email</div><div class="entry-note">Tenant, owner, contractor messages</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to draft a message for KV Properties — to a tenant, owner, or contractor. Help me write it.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Draft a message</div><div class="entry-note">Tenant, owner, or contractor comms</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Finance &amp; Contracts</div>
+    <div class="entry" onclick="HS.sendPrompt('What invoices do I have outstanding at KV Properties? What needs to be sent or followed up on?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Outstanding invoices</div><div class="entry-note">Unsent, unpaid, overdue</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to review or work on a contract for KV Properties.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Contracts</div><div class="entry-note">Review, draft, or flag issues</div></div><div class="entry-arrow">→</div>
+    </div>
+  </div>
+
+  <!-- HOMESTEAD -->
+  <div class="page" id="page-homestead">
+    <div class="page-title">Homestead</div>
+    <div class="page-sub">Goshen, Nova Scotia. Property, family, seasonal work, infrastructure.</div>
+
+    <div class="section-head">Property &amp; Build</div>
+    <div class="entry" onclick="HS.sendPrompt('What are the open property or build tasks on the homestead? What is in progress, what is next?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Build &amp; property tasks</div><div class="entry-note">In progress, queued, what is next</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('Help me plan a build or property project on the homestead — scope, materials, sequence.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Plan a project</div><div class="entry-note">Scope, materials, sequence</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Seasonal</div>
+    <div class="entry" onclick="HS.sendPrompt('What seasonal tasks are coming up on the homestead? What should I be doing or preparing for right now?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Seasonal to-dos</div><div class="entry-note">What to do now based on time of year</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('Help me think through food storage, harvest, or garden planning on the homestead.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Food, garden &amp; storage</div><div class="entry-note">Storage, harvest, planting plans</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Family</div>
+    <div class="entry" onclick="HS.sendPrompt('What family commitments, events, or to-dos are on my radar? Help me stay on top of them.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Family commitments</div><div class="entry-note">Events, obligations, what not to drop</div></div><div class="entry-arrow">→</div>
+    </div>
+  </div>
+
+  <!-- FINANCE -->
+  <div class="page" id="page-finance">
+    <div class="page-title">Finance</div>
+    <div class="page-sub">Awareness, not accounting. Bills, invoices, cash flow, subscriptions.</div>
+
+    <div class="section-head">Attention Items</div>
+    <div class="entry" onclick="HS.sendPrompt('Run a full financial attention check. Bills due soon, invoices unpaid, invoices not sent, cash flow concerns.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Full finance check</div><div class="entry-note">Bills, invoices, cash flow flags</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('What invoices have I not sent yet? Help me figure out what is outstanding and draft what needs to go out.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Unsent invoices</div><div class="entry-note">What to send, what is outstanding</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('What bills are coming due? Help me make sure nothing gets missed.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Bills due</div><div class="entry-note">Upcoming, overdue, do not miss</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Revenue &amp; Tax</div>
+    <div class="entry" onclick="HS.sendPrompt('What revenue opportunities are waiting or stalled? Where is money on the table I should be following up on?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Revenue opportunities</div><div class="entry-note">Stalled deals, follow-ups, money on table</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('Help me think about tax. What should I be setting aside and tracking across my income sources?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Tax awareness</div><div class="entry-note">Set aside, track, prepare</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('Review my subscriptions. What am I paying for regularly that I should audit or cancel?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Subscriptions audit</div><div class="entry-note">What you are paying for — cut the waste</div></div><div class="entry-arrow">→</div>
+    </div>
+  </div>
+
+  <!-- THE BOOK -->
+  <div class="page" id="page-book">
+    <div class="page-title">Kill the Drift</div>
+    <div class="page-sub">The book. Chapters, voice recordings, framework, writing momentum.</div>
+
+    <div class="section-head">Status</div>
+    <div class="entry" onclick="HS.sendPrompt('Where is Kill the Drift at? What chapters exist, what is drafted, what is next, and what the overall structure looks like.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Book status</div><div class="entry-note">Chapters done, in progress, what is next</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I want to work on the Kill the Drift framework. Help me think through the core ideas, structure, and what the book is really saying.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">The framework</div><div class="entry-note">Core ideas, structure, the spine of the book</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Writing</div>
+    <div class="entry" onclick="HS.sendPrompt('I want to write. Which chapter or section of Kill the Drift should I work on next? Help me get into it.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Write a chapter</div><div class="entry-note">Draft, continue, or outline a section</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I have voice notes or recordings for Kill the Drift. Help me turn them into usable chapter material.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Voice notes → content</div><div class="entry-note">Transcribe recordings, extract chapter ideas</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('I need to edit or tighten a section of Kill the Drift. Let me paste the draft and we will work on it.')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Edit a section</div><div class="entry-note">Tighten, sharpen, cut the drift</div></div><div class="entry-arrow">→</div>
+    </div>
+
+    <div class="section-head">Momentum</div>
+    <div class="entry" onclick="HS.sendPrompt('I have not worked on Kill the Drift in a while. Help me get back in. What is the last thing I worked on and what should I do for 30 minutes right now?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Get back in</div><div class="entry-note">Reconnect and do 30 minutes now</div></div><div class="entry-arrow">→</div>
+    </div>
+    <div class="entry" onclick="HS.sendPrompt('Help me think through the Kill the Drift publishing or release strategy. What are my options and what makes sense?')">
+      <div class="entry-bullet">—</div><div class="entry-body"><div class="entry-title">Publishing path</div><div class="entry-note">Options, strategy, how it goes out</div></div><div class="entry-arrow">→</div>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="page" id="page-settings">
+    <div class="page-title">Settings</div>
+    <div class="page-sub">Connections, sync, and scheduled routines.</div>
+
+    <div class="section-head">Connections</div>
+
+    <!-- These call the server-side OAuth flow, not signInWithPopup -->
+    <div class="entry" onclick="HS.connectIntegration('gmail')">
+      <div class="entry-bullet">—</div>
+      <div class="entry-body">
+        <div class="entry-title">Gmail</div>
+        <div class="entry-note">Connect to scan for follow-ups, waiting-ons, reply-needed</div>
+      </div>
+      <div class="entry-arrow" id="gmail-status">→</div>
+    </div>
+    <div class="entry" onclick="HS.connectIntegration('calendar')">
+      <div class="entry-bullet">—</div>
+      <div class="entry-body">
+        <div class="entry-title">Google Calendar</div>
+        <div class="entry-note">Connect to surface upcoming events and prep flags</div>
+      </div>
+      <div class="entry-arrow" id="cal-status">→</div>
+    </div>
+
+    <div class="section-head" style="margin-top:24px;">Night Debrief</div>
+    <div style="font-size:12px;color:var(--faded);font-style:italic;padding:4px 0 12px;">
+      Harlan sweeps Gmail and Calendar at this time, then queues open loops for review.
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <label style="font-size:11px;color:var(--faded);text-transform:uppercase;letter-spacing:1px;">Time</label>
+      <select id="debrief-time" onchange="HS.saveDebriefTime(this.value)"
+              style="font-family:Georgia,serif;font-size:13px;padding:5px 8px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);">
+        <option value="18:30">6:30 PM</option>
+        <option value="19:00">7:00 PM</option>
+        <option value="19:30">7:30 PM</option>
+        <option value="20:00">8:00 PM</option>
+        <option value="20:30" selected>8:30 PM</option>
+        <option value="21:00">9:00 PM</option>
+        <option value="21:30">9:30 PM</option>
+      </select>
+      <button onclick="HS.runDebriefNow()" class="routine-save" style="margin-left:0;">Run Now</button>
+    </div>
+
+    <div class="section-head">When-to-When Routines</div>
+    <div style="font-size:12px;color:var(--faded);font-style:italic;padding:4px 0 12px;">
+      Saved schedules for your recurring check-ins.
+    </div>
+
+    <div class="routine-block" id="routine-morning">
+      <div class="routine-header"><span class="routine-name">Morning Harlan Brief</span><span class="routine-badge" id="badge-morning">off</span></div>
+      <div class="routine-desc">Runs Harlan every morning and surfaces your Dispatch view.</div>
+      <div class="routine-controls">
+        <label>Time</label><input type="time" id="time-morning" value="07:00">
+        <label style="margin-left:14px;">Days</label>
+        <select id="days-morning"><option value="mon-fri">Mon–Fri</option><option value="daily">Every day</option><option value="mon-sat">Mon–Sat</option></select>
+        <button class="routine-save" onclick="saveRoutine('morning','Run Harlan. Give me a full morning Dispatch — urgent items, top 5 for today, what I am waiting on, anything on the calendar, and any financial flags.')">Save</button>
+        <button class="routine-off" onclick="cancelRoutine('morning')">Off</button>
+      </div>
+    </div>
+
+    <div class="routine-block" id="routine-weekly">
+      <div class="routine-header"><span class="routine-name">Weekly Project Pulse</span><span class="routine-badge" id="badge-weekly">off</span></div>
+      <div class="routine-desc">Full pulse across all projects — what moved, what stalled, what needs attention this week.</div>
+      <div class="routine-controls">
+        <label>Day</label>
+        <select id="day-weekly"><option value="1">Monday</option><option value="5">Friday</option><option value="0">Sunday</option></select>
+        <label style="margin-left:14px;">Time</label><input type="time" id="time-weekly" value="08:00">
+        <button class="routine-save" onclick="saveRoutine('weekly','Run the weekly project pulse. What moved forward, what is stalled, and what needs attention this week across The Outpost, Gifted, KV Properties, and Kill the Drift?')">Save</button>
+        <button class="routine-off" onclick="cancelRoutine('weekly')">Off</button>
+      </div>
+    </div>
+
+    <div class="routine-block" id="routine-eod">
+      <div class="routine-header"><span class="routine-name">End-of-Day Capture Review</span><span class="routine-badge" id="badge-eod">off</span></div>
+      <div class="routine-desc">Process the day's captures, flag open loops, and set tomorrow's focus.</div>
+      <div class="routine-controls">
+        <label>Time</label><input type="time" id="time-eod" value="17:00">
+        <label style="margin-left:14px;">Days</label>
+        <select id="days-eod"><option value="mon-fri">Mon–Fri</option><option value="daily">Every day</option></select>
+        <button class="routine-save" onclick="saveRoutine('eod','End of day review. Help me process any open captures, close out today\'s loops, and identify the top 3 things to carry into tomorrow.')">Save</button>
+        <button class="routine-off" onclick="cancelRoutine('eod')">Off</button>
+      </div>
+    </div>
+
+    <div class="section-head" style="margin-top:28px;">Active Routines</div>
+    <div id="active-routines-list" style="font-size:13px;color:var(--faded);font-style:italic;padding:6px 0;">No routines scheduled.</div>
+  </div>
+
+</div><!-- /journal -->
+
+<script>
+  // Date
+  const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const WEEKDAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const DAY_ABB  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const DAYS_MAP = {'mon-fri':'Mon–Fri','daily':'Every day','mon-sat':'Mon–Sat'};
+  const now = new Date();
+  document.getElementById('dateline').textContent =
+    WEEKDAYS[now.getDay()] + ', ' + MONTHS[now.getMonth()] + ' ' + now.getDate() + ', ' + now.getFullYear();
+
+  // Tabs
+  function switchTab(id, el) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    if (el) el.classList.add('active');
+    const page = document.getElementById('page-' + id);
+    if (page) page.classList.add('active');
+  }
+
+  // Capture
+  async function fireCapture() {
+    const input = document.getElementById('captureInput');
+    const val   = input.value.trim();
+    if (!val) return;
+    input.value = '';
+    await HS.saveCapture(val);
+    HS.sendPrompt('New capture: "' + val + '" — help me categorize this. Which project or bucket does it belong to, and what is the next action?');
+  }
+
+  // Routines (localStorage)
+  let activeRoutines = {};
+  try { activeRoutines = JSON.parse(localStorage.getItem('hs_routines') || '{}'); } catch (_) {}
+
+  function renderActiveRoutines() {
+    const el   = document.getElementById('active-routines-list');
+    const keys = Object.keys(activeRoutines);
+    if (!keys.length) { el.textContent = 'No routines scheduled.'; return; }
+    el.innerHTML = keys.map(k => {
+      const r = activeRoutines[k];
+      return '<div style="padding:5px 0;border-bottom:1px solid var(--rule);display:flex;justify-content:space-between;">' +
+        '<span>' + r.label + '</span><span style="color:var(--faded);font-size:11px;">' + r.schedule + '</span></div>';
+    }).join('');
+  }
+
+  function setBadge(id, on) {
+    const b = document.getElementById('badge-' + id);
+    if (!b) return;
+    b.textContent = on ? 'active' : 'off';
+    b.className   = 'routine-badge' + (on ? ' on' : '');
+  }
+
+  function saveRoutine(id, prompt) {
+    const timeEl = document.getElementById('time-' + id);
+    const daysEl = document.getElementById('days-' + id);
+    const dayEl  = document.getElementById('day-'  + id);
+    const time     = timeEl ? timeEl.value : '07:00';
+    const daysKey  = daysEl ? daysEl.value : null;
+    const dayNum   = dayEl  ? dayEl.value  : null;
+    const schedule = dayNum
+      ? DAY_ABB[parseInt(dayNum)] + 's at ' + time
+      : (DAYS_MAP[daysKey] || daysKey) + ' at ' + time;
+    const LABELS = { morning:'Morning Harlan Brief', weekly:'Weekly Project Pulse', eod:'End-of-Day Capture Review' };
+    activeRoutines[id] = { label: LABELS[id] || id, schedule, prompt };
+    try { localStorage.setItem('hs_routines', JSON.stringify(activeRoutines)); } catch (_) {}
+    setBadge(id, true);
+    renderActiveRoutines();
+  }
+
+  function cancelRoutine(id) {
+    delete activeRoutines[id];
+    try { localStorage.setItem('hs_routines', JSON.stringify(activeRoutines)); } catch (_) {}
+    setBadge(id, false);
+    renderActiveRoutines();
+  }
+
+  Object.keys(activeRoutines).forEach(k => setBadge(k, true));
+  renderActiveRoutines();
+</script>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@ import { SignInScreen } from "./components/auth/SignInScreen";
 import { CommandCenter } from "./components/layout/CommandCenter";
 
 export function App() {
-  const { user, authReady } = useAuth();
+  const { user, authReady, tokenReady } = useAuth();
 
   if (!authReady) {
     return <LoadingScreen />;
@@ -12,6 +12,10 @@ export function App() {
 
   if (!user) {
     return <SignInScreen />;
+  }
+
+  if (!tokenReady) {
+    return <LoadingScreen />;
   }
 
   return <CommandCenter user={user} />;
